@@ -1,0 +1,885 @@
+{
+  "orchestration_id": "7e5a9b0e-4f7c-4c13-9d2a-1b7f0d3a8e6c",
+  "created_at": "2026-05-24T00:00:00-03:00",
+  "current_phase": "F5",
+  "snapshot_version": "O5",
+  "last_stable_snapshot": "O5",
+  "product": {
+    "name": "SID3 -- SInsideDrive3",
+    "domain": "Cloud storage gateway",
+    "subdomains": [
+      "User identity and access",
+      "OAuth provider connection",
+      "Token security",
+      "Virtual bucket management",
+      "Object metadata management",
+      "File operations",
+      "API key management",
+      "Operational logging and quotas"
+    ],
+    "personas": [
+      {
+        "name": "Independent Developer",
+        "goals": [
+          "Add file storage quickly without configuring S3"
+        ],
+        "pains": [
+          "Cloud storage setup",
+          "IAM complexity",
+          "Cost uncertainty"
+        ]
+      },
+      {
+        "name": "Early-stage SaaS Founder",
+        "goals": [
+          "Ship document or image storage before committing to cloud storage spend"
+        ],
+        "pains": [
+          "Limited budget",
+          "Small team",
+          "Need secure customer isolation"
+        ]
+      },
+      {
+        "name": "Small Business Operator",
+        "goals": [
+          "Reuse existing Google Workspace storage for internal file workflows"
+        ],
+        "pains": [
+          "No dedicated infrastructure team",
+          "Need auditability",
+          "Low maintenance requirement"
+        ]
+      },
+      {
+        "name": "Content Creator or Automation Builder",
+        "goals": [
+          "Automate upload and retrieval of generated assets or documents"
+        ],
+        "pains": [
+          "Manual Drive workflows",
+          "Limited technical infrastructure"
+        ]
+      }
+    ],
+    "problems": [
+      "Initial object storage setup can be too complex for small teams",
+      "S3 and IAM introduce learning curve and operational overhead",
+      "Teams may already pay for Google Drive storage but cannot consume it cleanly as an API backend",
+      "Google Drive is not shaped like object storage, so developers need a gateway that normalizes access"
+    ],
+    "hypotheses": [
+      "Developers and small teams will use a Drive-backed storage gateway if they can connect Google Drive and perform secure file CRUD operations through API endpoints within minutes"
+    ],
+    "strategic_goals": [
+      "Deliver a low-cost file storage bridge for early-stage projects",
+      "Validate Google Drive as the first storage provider",
+      "Prepare the architecture for future partial S3 compatibility and additional providers"
+    ],
+    "business_rules": [
+      "A user can access only their own projects, buckets, files, tokens, and API keys",
+      "Each file operation must resolve through a SID3 project and virtual bucket",
+      "API keys belong to a user/project and must be revocable",
+      "Google Drive tokens must never be returned to clients",
+      "A revoked Google integration blocks future file operations for that provider",
+      "Public file exposure is disabled unless an explicit controlled sharing feature is designed later",
+      "File metadata in SID3 is the source of truth for SID3 object identity"
+    ],
+    "domain_processes": [
+      "User signs up and authenticates",
+      "User connects Google Drive through OAuth 2.0",
+      "SID3 stores encrypted provider tokens",
+      "User creates a virtual bucket",
+      "User generates an API key for a project",
+      "External client uploads a file through SID3",
+      "SID3 stores file bytes in Google Drive and metadata in PostgreSQL",
+      "External client lists, downloads, or deletes files through SID3"
+    ],
+    "domain_glossary": {
+      "Virtual bucket": "SID3 logical container that maps API-facing object organization to provider-specific storage",
+      "Object": "A file exposed through SID3 API semantics",
+      "Provider": "External storage backend such as Google Drive",
+      "Integration": "A user's connected provider account and credentials",
+      "API key": "Project-scoped credential used by external systems to call SID3 file APIs"
+    },
+    "mvp_hypothesis": "If developers and small teams can connect Google Drive to SID3 and receive secure API endpoints for file CRUD operations within minutes, they will use SID3 as a low-cost storage bridge before migrating to dedicated object storage.",
+    "mvp_scope": [
+      "SID3 user authentication",
+      "Google OAuth 2.0 connection",
+      "Encrypted token storage",
+      "Google Drive connection revocation",
+      "Virtual bucket creation",
+      "Upload file to Google Drive through SID3 API",
+      "Download file through SID3 API",
+      "List stored files",
+      "Delete stored files",
+      "Generate API key by user/project",
+      "Basic file metadata persistence in PostgreSQL",
+      "Simple dashboard for integrations, buckets, and files",
+      "Operation logs"
+    ],
+    "learning_metrics": [
+      "Median time from signup to first successful upload",
+      "Google Drive OAuth failure rate",
+      "File operation success rate",
+      "API error rate by operation type"
+    ],
+    "metrics": [
+      "Account creation completed",
+      "Google Drive connected successfully",
+      "First API key generated",
+      "First file uploaded through the SID3 API",
+      "First file downloaded through the SID3 API",
+      "File listing returns only files owned by the authenticated user/project",
+      "File deletion removes or marks the mapped object consistently"
+    ],
+    "feedback_insights": [],
+    "evolution_backlog": [
+      "Partial S3 compatibility",
+      "Additional providers",
+      "Official SDK",
+      "Billing and payments",
+      "Team permissions",
+      "Object versioning",
+      "CDN integration"
+    ],
+    "strategy_update": null
+  },
+  "market": {
+    "landscape": "Developer tooling and cloud storage gateway for users who need API-based file storage while reusing existing Google Drive capacity.",
+    "competitors": [
+      "Amazon S3",
+      "Google Cloud Storage",
+      "Cloudflare R2",
+      "Supabase Storage",
+      "Firebase Storage",
+      "Direct Google Drive API integrations"
+    ],
+    "positioning": "Low-cost bridge between Google Drive and developer-friendly storage APIs for early-stage teams.",
+    "trends": [
+      "Cost optimization for early-stage SaaS",
+      "API-first infrastructure tools",
+      "Bring-your-own-storage patterns",
+      "Developer platforms that abstract provider complexity"
+    ]
+  },
+  "business": {
+    "model": "Initial MVP without billing; future SaaS subscription based on usage, projects, storage operations, connected providers, or team features.",
+    "revenue_streams": [
+      "Future subscription plans",
+      "Future usage-based limits",
+      "Future provider or team feature tiers"
+    ],
+    "value_proposition": "SID3 gives small teams a low-cost bridge from Google Drive storage to developer-friendly API storage while preserving a path to provider abstraction and partial S3-compatible workflows."
+  },
+  "requirements": {
+    "functional": [
+      "Users can create accounts and authenticate",
+      "Users can connect Google Drive via OAuth 2.0",
+      "Users can revoke Google Drive access",
+      "Users can create virtual buckets",
+      "Users can generate and rotate API keys",
+      "API clients can upload files to a virtual bucket",
+      "API clients can download files by object identifier or key",
+      "API clients can list files in a bucket",
+      "API clients can delete files",
+      "Dashboard users can view integrations, buckets, and file metadata",
+      "System records operation logs for file operations"
+    ],
+    "non_functional": [
+      "Google tokens must be encrypted at rest",
+      "OAuth scopes must be minimal for the required Drive operations",
+      "API endpoints must enforce user/project isolation",
+      "API access must use API Key and JWT where appropriate",
+      "Logs must not expose secrets or file contents",
+      "Provider-specific logic must be isolated to support future providers",
+      "System must respect Google Drive API limits and policies",
+      "Metadata persistence must support future S3-like object semantics"
+    ],
+    "constraints": [
+      "Low-cost stack preferred",
+      "Stack preference: NestJS, PostgreSQL, Prisma, optional Redis, Angular or Next.js dashboard",
+      "Primary integration: Google Drive API and Google OAuth 2.0",
+      "No mobile app in MVP",
+      "No billing in MVP"
+    ]
+  },
+  "scope": {
+    "included": [
+      "SID3 user login and authentication",
+      "Google Drive OAuth 2.0 connection",
+      "Secure encrypted token storage",
+      "Google Drive connection revocation",
+      "Virtual bucket creation",
+      "Upload file to Google Drive through SID3 API",
+      "Download file through SID3 API",
+      "List stored files",
+      "Delete stored files",
+      "Generate API key by user/project",
+      "Basic file metadata persistence in PostgreSQL",
+      "Simple dashboard for integrations, buckets, and files",
+      "Operation logs"
+    ],
+    "excluded": [
+      "Complete S3 compatibility",
+      "Advanced multipart upload",
+      "CDN",
+      "Distributed cache",
+      "Object versioning",
+      "Multiple storage providers",
+      "Official SDK",
+      "Billing and payments",
+      "Mobile application",
+      "Complex team permissions",
+      "Advanced client-side encryption"
+    ],
+    "boundaries": "The MVP is a single-provider Google Drive-backed storage gateway with SID3-owned identity, API keys, virtual buckets, metadata, and dashboard.",
+    "phasing": [
+      "Phase 1: Auth, Google OAuth, encrypted tokens, API keys",
+      "Phase 2: Virtual buckets and Google Drive upload/download",
+      "Phase 3: Listing, deletion, metadata registry, logs",
+      "Phase 4: Dashboard workflows",
+      "Phase 5: Hardening and preparation for provider abstraction"
+    ]
+  },
+  "feasibility": {
+    "verdict": "VIAVEL_COM_RISCOS",
+    "risks": [
+      "Google Drive API quota and rate-limit behavior may constrain throughput",
+      "OAuth verification and Google API policies may affect production launch",
+      "Broad Drive scopes can increase security and compliance burden",
+      "Google Drive folder/file semantics differ from S3 object storage semantics",
+      "Token encryption and revocation must be implemented correctly from the start",
+      "Download/upload latency depends on Google Drive API behavior"
+    ],
+    "constraints": [
+      "Use minimum OAuth scopes that still support required file operations",
+      "Keep provider access behind explicit ports/adapters",
+      "Store encrypted refresh/access tokens with key rotation strategy planned in F2",
+      "Add operation logs and provider error mapping from MVP",
+      "Treat S3 compatibility as a later contract layer, not the initial API",
+      "Define quota handling and retry/backoff in architecture"
+    ]
+  },
+  "architecture": {
+    "pattern": "modular-monolith",
+    "services": [
+      "sid3-api",
+      "sid3-dashboard",
+      "postgresql",
+      "redis-optional",
+      "google-drive-api"
+    ],
+    "boundaries": [
+      "Identity and sessions",
+      "Projects",
+      "API keys",
+      "Provider integrations",
+      "Buckets",
+      "Objects and metadata",
+      "File operations",
+      "Audit logs"
+    ],
+    "component_diagram": "External API clients and the Angular dashboard call the NestJS API. The API coordinates identity, API keys, file operations, and audit logs. File operations persist SID3 metadata in PostgreSQL and call Google Drive through a storage provider port implemented by the Google Drive adapter.",
+    "data_flows": [
+      "Dashboard login: user credentials -> SID3 identity -> JWT/session -> dashboard API calls",
+      "Google connection: dashboard -> OAuth redirect -> Google callback -> encrypted token storage",
+      "API key operation: external client -> API key lookup and hash verification -> project authorization",
+      "Upload: API client -> bucket/object validation -> Google Drive adapter -> metadata persisted -> audit log",
+      "Download: API client -> object authorization -> Google Drive adapter -> streamed response -> audit log",
+      "Delete: API client -> object authorization -> Google Drive adapter delete/trash -> metadata update -> audit log"
+    ],
+    "communication_patterns": "Synchronous REST for dashboard and external API clients. Synchronous Google Drive API calls for MVP file operations. Durable audit logs are written in PostgreSQL. Redis and background jobs are deferred until rate limits, retries, or long-running operations require them.",
+    "layer_map": {
+      "backend": {
+        "presentation": "NestJS controllers, guards, interceptors, DTO validation, OpenAPI decorators",
+        "application": "Use cases, command/query handlers where useful, transaction orchestration",
+        "domain": "Entities, value objects, domain services, repository/provider ports, invariants",
+        "infrastructure": "Prisma repositories, Google Drive adapter, OAuth client, encryption, hashing, logging"
+      },
+      "dashboard": {
+        "presentation": "Angular routes, pages, components, forms",
+        "application": "Feature services, state, API clients",
+        "domain": "Dashboard models and view contracts",
+        "infrastructure": "HTTP client adapters and auth storage"
+      }
+    },
+    "module_responsibilities": [
+      {
+        "module": "Identity",
+        "responsibility": "User registration, login, password/session handling, JWT/session issuance"
+      },
+      {
+        "module": "Projects",
+        "responsibility": "Project ownership, project settings, grouping of API keys and buckets"
+      },
+      {
+        "module": "API keys",
+        "responsibility": "Project-scoped key creation, one-time secret display, hashing, rotation, revocation"
+      },
+      {
+        "module": "Provider integrations",
+        "responsibility": "Google OAuth flow, encrypted token storage, token refresh, connection revocation"
+      },
+      {
+        "module": "Buckets",
+        "responsibility": "Virtual bucket lifecycle and namespace rules"
+      },
+      {
+        "module": "Objects",
+        "responsibility": "SID3 object metadata, provider mapping, ownership, object keys"
+      },
+      {
+        "module": "File operations",
+        "responsibility": "Upload, download, list, delete orchestration through storage provider ports"
+      },
+      {
+        "module": "Audit logs",
+        "responsibility": "Operation logging without secrets or file contents"
+      }
+    ],
+    "integration_contracts": [
+      {
+        "name": "Google OAuth 2.0",
+        "purpose": "Connect and revoke a user's Google Drive integration",
+        "risk": "Scope selection and Google app verification"
+      },
+      {
+        "name": "Google Drive API",
+        "purpose": "Upload, download, list, and delete provider files",
+        "risk": "Quota, rate limits, folder semantics, and provider errors"
+      }
+    ],
+    "external_dependencies": [
+      "Google OAuth 2.0",
+      "Google Drive API",
+      "PostgreSQL",
+      "Redis optional for rate limiting or job coordination"
+    ],
+    "infrastructure_strategy": {
+      "local": "Docker Compose for PostgreSQL and optional Redis",
+      "mvp_deploy": "One API service, one dashboard deployment, and PostgreSQL",
+      "storage_bytes": "Google Drive stores file bytes",
+      "metadata": "PostgreSQL stores SID3 metadata and provider mappings",
+      "scaling": "Vertical/simple horizontal API scaling first; introduce workers only when long-running file operations require them",
+      "cost": "Prefer low-cost managed services or a small VPS/container host for MVP"
+    },
+    "tech_stack": {
+      "language": "TypeScript",
+      "runtime": "Node.js",
+      "backend": "NestJS",
+      "frontend": "Angular",
+      "database": "PostgreSQL",
+      "orm": "Prisma",
+      "cache": "Redis optional",
+      "api_docs": "OpenAPI",
+      "package_manager": "pnpm",
+      "local_infra": "Docker Compose",
+      "testing": [
+        "Jest",
+        "Supertest",
+        "Angular tests"
+      ]
+    },
+    "security_model": {
+      "dashboard_auth": "User session/JWT authentication",
+      "external_api_auth": "Project-scoped API keys",
+      "api_key_storage": "Store only hashed API key secrets with non-secret lookup prefix",
+      "oauth_token_storage": "Encrypt Google OAuth tokens at rest",
+      "oauth_scopes": [
+        "Prefer https://www.googleapis.com/auth/drive.file unless F3 proves broader scope is required"
+      ],
+      "authorization": [
+        "Every operation checks user, project, bucket, object, and provider integration ownership",
+        "Revoked provider integrations block future provider operations"
+      ],
+      "logging": [
+        "Do not log tokens, API key secrets, file contents, or sensitive OAuth payloads",
+        "Audit upload, download, list, delete, OAuth connect/revoke, and API key lifecycle events"
+      ],
+      "threats": [
+        "OAuth token leakage",
+        "API key leakage",
+        "Cross-user or cross-project object access",
+        "Provider quota abuse",
+        "Accidental public file exposure"
+      ]
+    },
+    "distributed_config": null,
+    "async_config": {
+      "mvp": "Synchronous operations with durable audit logs",
+      "deferred": [
+        "Background workers for long-running uploads/downloads",
+        "Outbox events for operation lifecycle",
+        "Retry queues for provider rate-limit handling"
+      ]
+    },
+    "scale_decisions": [
+      "Do not use microservices in MVP",
+      "Keep provider adapter replaceable",
+      "Introduce Redis only after rate limiting or job coordination needs are confirmed",
+      "Model object metadata independently from Google Drive IDs to support future providers and S3-like keys"
+    ],
+    "reassessment_report": null,
+    "adrs": [
+      {
+        "id": "ADR-0001",
+        "title": "Product Scope and MVP Boundary",
+        "status": "Accepted with risks",
+        "path": "docs/orchestration/adr/ADR-0001-product-scope-mvp.md"
+      },
+      {
+        "id": "ADR-0002",
+        "title": "Modular Monolith with Ports and Adapters",
+        "status": "Accepted with risks",
+        "path": "docs/orchestration/adr/ADR-0002-architecture-pattern.md"
+      },
+      {
+        "id": "ADR-0003",
+        "title": "Technology Stack",
+        "status": "Accepted",
+        "path": "docs/orchestration/adr/ADR-0003-technology-stack.md"
+      },
+      {
+        "id": "ADR-0004",
+        "title": "Security Model",
+        "status": "Accepted with risks",
+        "path": "docs/orchestration/adr/ADR-0004-security-model.md"
+      },
+      {
+        "id": "ADR-0005",
+        "title": "Data and Provider Consistency Model",
+        "status": "Accepted with risks",
+        "path": "docs/orchestration/adr/ADR-0005-data-consistency.md"
+      }
+    ]
+  },
+  "ux": {
+    "journeys": [
+      "First successful upload",
+      "Manage Google Drive integration",
+      "External system reads stored files",
+      "Diagnose file operation failure"
+    ],
+    "wireframes": [
+      "App shell",
+      "Login/register",
+      "Projects",
+      "Integrations",
+      "Buckets",
+      "API Keys",
+      "Files",
+      "Logs"
+    ],
+    "design_system": {
+      "style": "Operational SaaS dashboard, dense and utilitarian",
+      "principles": [
+        "Clear ownership context",
+        "Visible integration status",
+        "One-time secret display clarity",
+        "No secret exposure in UI"
+      ]
+    },
+    "usability_issues": [
+      "OAuth failures must be explained without exposing provider payloads",
+      "API key secret is unrecoverable after creation and needs clear one-time display"
+    ],
+    "validated_journeys": [
+      "First successful upload",
+      "Manage Google Drive integration",
+      "External system reads stored files",
+      "Diagnose file operation failure"
+    ],
+    "accessibility_compliance": "Target WCAG 2.1 AA for dashboard controls and forms"
+  },
+  "contracts": {
+    "schemas": [
+      "User",
+      "Project",
+      "ApiKey",
+      "ProviderIntegration",
+      "Bucket",
+      "StorageObject",
+      "OperationLog",
+      "OAuthState"
+    ],
+    "api_version": "v1",
+    "api_spec": "docs/contracts/openapi-v1.yaml",
+    "dtos": [
+      "RegisterRequest",
+      "LoginRequest",
+      "AuthResponse",
+      "CreateProjectRequest",
+      "OAuthAuthorizeResponse",
+      "OAuthCallbackRequest",
+      "CreateApiKeyRequest",
+      "ApiKeyCreated",
+      "CreateBucketRequest",
+      "UploadObjectRequest",
+      "ObjectListResponse",
+      "OperationLogResponse",
+      "ErrorResponse"
+    ],
+    "consistency_model": "eventual",
+    "transaction_boundaries": [
+      "User registration: single database transaction",
+      "Project and bucket creation: single database transaction",
+      "API key creation: store hash inside transaction and return plaintext secret once",
+      "OAuth callback: validate state, encrypt tokens, upsert integration, consume state in one transaction",
+      "Upload: metadata PENDING -> provider upload -> metadata AVAILABLE or FAILED",
+      "Download: metadata authorization before provider stream",
+      "Delete: metadata DELETING -> provider delete/trash -> metadata DELETED; repeated delete is idempotent"
+    ],
+    "concurrency_strategy": "Use database uniqueness for bucket names and active object keys; use explicit object statuses for provider operations; make delete idempotent; add reconciliation jobs later for stuck PENDING or DELETING records."
+  },
+  "engineering": {
+    "project_structure": "pnpm monorepo with apps/api (NestJS), apps/dashboard (Angular), docs, Docker Compose, and Prisma schema.",
+    "governance_rules": {
+      "package_manager": "pnpm",
+      "typecheck": "pnpm typecheck",
+      "build": "pnpm build",
+      "test": "pnpm test",
+      "database_migration": "pnpm --filter @sid3/api exec prisma migrate dev",
+      "no_plaintext_secrets": true
+    },
+    "patterns_applied": [
+      "AES-256-GCM provider token encryption",
+      "API key prefix lookup preparation",
+      "API key protected object operations",
+      "Angular JWT auth interceptor",
+      "Angular multipart upload workflow",
+      "Angular protected route guard",
+      "Angular standalone app shell",
+      "Authenticated project ownership checks",
+      "Browser object download workflow",
+      "Bucket name uniqueness per project",
+      "Bucket project ownership checks",
+      "Connected provider integration validation",
+      "Current user decorator",
+      "Dashboard API key based object operations",
+      "Dashboard API key workflow",
+      "Dashboard auth workflow",
+      "Dashboard bucket workflow",
+      "Dashboard file workflow",
+      "Dashboard integrations workflow",
+      "Dashboard logs workflow",
+      "Dashboard project workflow",
+      "Docker Compose local infrastructure",
+      "Feature-scoped Angular HTTP services",
+      "GitHub Actions CI baseline",
+      "Google Drive smoke test runbook",
+      "Google Drive smoke test script",
+      "Google Drive storage adapter",
+      "Google OAuth adapter isolation",
+      "JWT auth guard",
+      "JWT dashboard authentication",
+      "Modular monolith workspace",
+      "NestJS module boundaries",
+      "OAuth state hashing and replay prevention",
+      "Object metadata status lifecycle",
+      "One-time API key secret display",
+      "OpenAPI contract validation",
+      "Operation logging for object workflows",
+      "Project-scoped operation log queries",
+      "Prisma database schema from O3 data model",
+      "Project slug uniqueness per owner",
+      "Project-scoped API key lifecycle",
+      "Protected Projects controller",
+      "Provider error mapping without token exposure",
+      "Provider integration revocation state",
+      "Provider registry by Provider enum",
+      "Provider-backed upload/download/delete orchestration",
+      "SHA-256 API key secret hashing",
+      "Secret scanning script",
+      "Storage provider port abstraction",
+      "Swagger/OpenAPI setup",
+      "Virtual bucket lifecycle",
+      "bcrypt password hashing"
+    ],
+    "cicd_config": "GitHub Actions CI baseline is available at .github/workflows/ci.yml with security, API, and dashboard jobs. Local scripts cover build, typecheck, tests, API coverage, OpenAPI contract validation, Prisma generate, migration, secret scan, and high-severity dependency audit.",
+    "quality_thresholds": {
+      "test_coverage": 80,
+      "build_required": true,
+      "typecheck_required": true,
+      "secret_scan_required_before_f5_gate": true
+    },
+    "module_map": {
+      "identity": [],
+      "projects": [
+        "identity"
+      ],
+      "provider-integrations": [
+        "identity"
+      ],
+      "api-keys": [
+        "identity",
+        "projects"
+      ],
+      "buckets": [
+        "identity",
+        "projects",
+        "provider-integrations"
+      ],
+      "objects": [
+        "projects",
+        "buckets"
+      ],
+      "file-operations": [
+        "api-keys",
+        "buckets",
+        "objects",
+        "provider-integrations",
+        "audit-logs"
+      ],
+      "audit-logs": [
+        "projects"
+      ]
+    },
+    "feature_breakdown": [
+      "Auth",
+      "Projects",
+      "Google OAuth integration",
+      "API keys",
+      "Buckets",
+      "Objects upload/list/download/delete",
+      "Dashboard",
+      "Audit logs",
+      "Local infra and CI"
+    ],
+    "backlog": [
+      "docs/engineering/backlog.md"
+    ],
+    "priorities": [
+      "Backend scaffold and database schema",
+      "Identity and project ownership",
+      "Google OAuth and encrypted tokens",
+      "API keys and guards",
+      "Buckets and provider port",
+      "Upload/list/download/delete",
+      "Dashboard setup workflow",
+      "Logs, hardening, and CI"
+    ],
+    "test_coverage_threshold": 80,
+    "coverage_report": {
+      "last_run": "2026-05-24",
+      "scope": "Backend behavioral units: services, guards, providers, registries",
+      "statements": 95.6,
+      "branches": 80.62,
+      "functions": 98.95,
+      "lines": 95.18,
+      "threshold": 80,
+      "status": "PASS"
+    },
+    "maintenance_log": [
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Created monorepo foundation, NestJS API health endpoint, Prisma schema/migration, Angular dashboard shell, local Docker Compose, and F5 progress document.",
+        "status": "IN_PROGRESS",
+        "artifact": "docs/engineering/f5-progress.md"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Identity module with register, login, JWT guard, current user endpoint, password hashing, and unit tests. Runtime validation passed against local PostgreSQL.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/auth"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Projects module with authenticated create/list endpoints, owner isolation, slug generation, duplicate handling, unit tests, and runtime validation against local PostgreSQL.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/projects"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Google OAuth Integration module with authorize/callback/list/revoke endpoints, encrypted token storage, OAuth state hashing/consumption, Google adapter isolation, unit tests, and runtime validation for protected integration listing.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/integrations"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented API Key module with create/list/revoke endpoints, one-time secret generation, hash-only persistence, project ownership enforcement, unit tests, and runtime validation against local PostgreSQL.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/api-keys"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Bucket module with create/list endpoints, project ownership enforcement, connected provider integration validation, duplicate bucket handling, unit tests, and runtime validation against local PostgreSQL.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/buckets"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented storage provider port, provider registry, and Google Drive adapter for upload/download/delete with encrypted token decryption, provider error mapping, and focused unit tests.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/storage-providers"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented API key guard and Objects module with upload/list/download/delete endpoints, provider registry integration, object metadata status lifecycle, operation logs, focused tests, and API build validation.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/objects"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Angular dashboard integration for login, registration, JWT persistence/interceptor, protected layout, logout, project listing, and project creation. Validated dashboard typecheck/build and route availability with local API.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/dashboard/src/app"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Angular dashboard pages and services for provider integrations, API keys, and buckets, including protected navigation, one-time API key secret display, Google connect/revoke UI, and bucket creation against connected integrations.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/dashboard/src/app/features"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Angular Files page and ObjectsService for API-key-authenticated object list/upload/download/delete with project, bucket, and API key selection plus prefix filtering.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/dashboard/src/app/features/files"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Implemented Operation Logs API module and Angular Logs page for authenticated project-scoped audit log listing, with limit validation, project ownership checks, focused backend tests, and dashboard route/navigation.",
+        "status": "IN_PROGRESS",
+        "artifact": "apps/api/src/modules/operation-logs"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Added GitHub Actions CI baseline, local secret scan, dependency audit script, backend coverage threshold enforcement, and extra branch tests for auth, encryption, storage provider registry, and object workflows.",
+        "status": "IN_PROGRESS",
+        "artifact": ".github/workflows/ci.yml"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-05-24",
+        "summary": "Added formal OpenAPI contract validation with swagger-parser, wired it into CI, and added an interactive Google Drive smoke test script plus runbook for the final real-provider validation.",
+        "status": "IN_PROGRESS",
+        "artifact": "scripts/smoke-google-drive.mjs"
+      }
+    ]
+  },
+  "quality": {
+    "gates_passed": [
+      {
+        "phase": "F1",
+        "snapshot": "O1",
+        "status": "APPROVED_WITH_RISKS",
+        "criteria_met": [
+          "personas_structured",
+          "mvp_hypothesis_declared",
+          "scope_boundaries_defined",
+          "success_metrics_defined",
+          "feasibility_viable_with_risks"
+        ],
+        "timestamp": "2026-05-24"
+      },
+      {
+        "phase": "F2",
+        "snapshot": "O2",
+        "status": "APPROVED_WITH_RISKS",
+        "criteria_met": [
+          "architecture_pattern_selected",
+          "technology_stack_locked",
+          "security_model_defined",
+          "infrastructure_strategy_defined",
+          "external_integrations_cataloged",
+          "no_architecture_conflicts_detected"
+        ],
+        "timestamp": "2026-05-24"
+      },
+      {
+        "phase": "F3",
+        "snapshot": "O3",
+        "status": "APPROVED_WITH_RISKS",
+        "criteria_met": [
+          "schema_versioned",
+          "openapi_spec_generated",
+          "consistency_model_chosen_with_adr",
+          "transaction_boundaries_mapped",
+          "dtos_concrete_no_any"
+        ],
+        "timestamp": "2026-05-24"
+      },
+      {
+        "phase": "F4",
+        "snapshot": "O4",
+        "status": "APPROVED_WITH_RISKS",
+        "criteria_met": [
+          "critical_journeys_defined",
+          "wireframes_generated",
+          "backlog_generated",
+          "acceptance_criteria_defined",
+          "module_dependencies_without_cycles",
+          "coverage_threshold_registered"
+        ],
+        "timestamp": "2026-05-24"
+      }
+    ],
+    "gates_failed": [],
+    "test_results": {
+      "last_run": "2026-05-24",
+      "commands": [
+        "pnpm security:secrets",
+        "pnpm security:audit",
+        "pnpm contracts:validate",
+        "pnpm --filter @sid3/api exec jest --runInBand",
+        "pnpm --filter @sid3/api typecheck",
+        "pnpm --filter @sid3/api test:coverage",
+        "pnpm --filter @sid3/api build",
+        "pnpm --filter @sid3/dashboard typecheck",
+        "pnpm --filter @sid3/dashboard build"
+      ],
+      "status": "PASS_FOR_F5_LOCAL_QUALITY_BASELINE",
+      "notes": "F5 gate remains incomplete until a real Google OAuth/file-operation smoke test is executed with valid credentials."
+    },
+    "coverage_report": {
+      "last_run": "2026-05-24",
+      "status": "PASS",
+      "threshold": 80,
+      "statements": 95.6,
+      "branches": 80.62,
+      "functions": 98.95,
+      "lines": 95.18
+    },
+    "security_report": {
+      "last_run": "2026-05-24",
+      "status": "PASS",
+      "checks": [
+        "pnpm security:secrets",
+        "pnpm security:audit"
+      ],
+      "notes": "Secret scan passed and pnpm audit reported no known high-severity vulnerabilities."
+    },
+    "qa_report": null
+  },
+  "operations": {
+    "deployment_record": null,
+    "smoke_test_results": {
+      "status": "READY_NOT_EXECUTED",
+      "script": "pnpm smoke:google-drive",
+      "runbook": "docs/operations/google-drive-smoke-test.md",
+      "blocking_reason": "Requires valid Google OAuth credentials and interactive user consent against a real Google Drive account."
+    },
+    "observability_config": null,
+    "slos": [],
+    "alerts": [],
+    "runbooks": [
+      "docs/operations/google-drive-smoke-test.md"
+    ],
+    "incidents": [],
+    "cost_optimization_report": null
+  }
+}

@@ -1,0 +1,85 @@
+name: API
+
+on:
+  pull_request:
+    paths:
+      - 'api/**'
+      - 'scripts/**'
+      - 'docs/contracts/**'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'api/**'
+      - 'scripts/**'
+      - 'docs/contracts/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Security
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+
+  api:
+    name: API
+    runs-on: ubuntu-24.04
+    needs: security
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: api/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+
+      - name: OpenAPI contract validation
+        run: node ../scripts/validate-openapi.mjs
+
+      - name: Generate Prisma client
+        run: pnpm prisma:generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests with coverage
+        run: pnpm test:coverage
+
+      - name: Build
+        run: pnpm build
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage
+          path: api/coverage
+          if-no-files-found: error

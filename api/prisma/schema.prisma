@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Provider {
+  GOOGLE_DRIVE
+}
+
+enum ProviderIntegrationStatus {
+  CONNECTED
+  REVOKED
+  ERROR
+}
+
+enum StorageObjectStatus {
+  PENDING
+  AVAILABLE
+  DELETING
+  DELETED
+  FAILED
+}
+
+enum OperationType {
+  UPLOAD
+  DOWNLOAD
+  LIST
+  DELETE
+  OAUTH_CONNECT
+  OAUTH_REVOKE
+  API_KEY_CREATE
+  API_KEY_REVOKE
+}
+
+enum OperationStatus {
+  SUCCESS
+  FAILED
+}
+
+enum PoolRoutingStrategy {
+  ROUND_ROBIN
+  FILL_FIRST
+  WEIGHTED
+}
+
+model User {
+  id                   String                @id @default(uuid()) @db.Uuid
+  email                String                @unique
+  passwordHash         String                @map("password_hash")
+  name                 String?
+  projects             Project[]
+  providerIntegrations ProviderIntegration[]
+  storageObjects       StorageObject[]
+  operationLogs        OperationLog[]
+  oauthStates          OAuthState[]
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Project {
+  id             String        @id @default(uuid()) @db.Uuid
+  ownerUserId    String        @map("owner_user_id") @db.Uuid
+  owner          User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  name           String
+  slug           String
+  apiKeys        ApiKey[]
+  buckets        Bucket[]
+  storagePools   StoragePool[]
+  storageObjects StorageObject[]
+  operationLogs  OperationLog[]
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  @@unique([ownerUserId, slug])
+  @@map("projects")
+}
+
+model ApiKey {
+  id            String         @id @default(uuid()) @db.Uuid
+  projectId     String         @map("project_id") @db.Uuid
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String
+  prefix        String         @unique
+  secretHash    String         @map("secret_hash")
+  lastUsedAt    DateTime?      @map("last_used_at")
+  revokedAt     DateTime?      @map("revoked_at")
+  operationLogs OperationLog[]
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  @@map("api_keys")
+}
+
+model ProviderIntegration {
+  id                    String                    @id @default(uuid()) @db.Uuid
+  userId                String                    @map("user_id") @db.Uuid
+  user                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider              Provider
+  displayName           String?                   @map("display_name")
+  providerAccountEmail  String?                   @map("provider_account_email")
+  encryptedAccessToken  String                    @map("encrypted_access_token")
+  encryptedRefreshToken String?                   @map("encrypted_refresh_token")
+  tokenExpiresAt        DateTime?                 @map("token_expires_at")
+  scopes                String[]
+  status                ProviderIntegrationStatus @default(CONNECTED)
+  revokedAt             DateTime?                 @map("revoked_at")
+  buckets               Bucket[]
+  poolMemberships       StoragePoolMember[]
+  resolvedObjects       StorageObject[]           @relation("ResolvedIntegration")
+  createdAt             DateTime                  @default(now()) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
+
+  @@index([userId, provider])
+  @@map("provider_integrations")
+}
+
+model StoragePool {
+  id        String               @id @default(uuid()) @db.Uuid
+  projectId String               @map("project_id") @db.Uuid
+  project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  strategy  PoolRoutingStrategy  @default(ROUND_ROBIN)
+  members   StoragePoolMember[]
+  buckets   Bucket[]
+  createdAt DateTime             @default(now()) @map("created_at")
+  updatedAt DateTime             @updatedAt @map("updated_at")
+
+  @@unique([projectId, name])
+  @@map("storage_pools")
+}
+
+model StoragePoolMember {
+  id                    String              @id @default(uuid()) @db.Uuid
+  poolId                String              @map("pool_id") @db.Uuid
+  pool                  StoragePool         @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  providerIntegrationId String              @map("provider_integration_id") @db.Uuid
+  providerIntegration   ProviderIntegration @relation(fields: [providerIntegrationId], references: [id], onDelete: Restrict)
+  weight                Int                 @default(1)
+  roundRobinIndex       Int                 @default(0) @map("round_robin_index")
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  @@unique([poolId, providerIntegrationId])
+  @@map("storage_pool_members")
+}
+
+model Bucket {
+  id                    String               @id @default(uuid()) @db.Uuid
+  projectId             String               @map("project_id") @db.Uuid
+  project               Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  providerIntegrationId String?              @map("provider_integration_id") @db.Uuid
+  providerIntegration   ProviderIntegration? @relation(fields: [providerIntegrationId], references: [id], onDelete: Restrict)
+  storagePoolId         String?              @map("storage_pool_id") @db.Uuid
+  storagePool           StoragePool?         @relation(fields: [storagePoolId], references: [id], onDelete: Restrict)
+  name                  String
+  providerRootRef       String?              @map("provider_root_ref")
+  storageObjects        StorageObject[]
+  operationLogs         OperationLog[]
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  @@unique([projectId, name])
+  @@map("buckets")
+}
+
+model StorageObject {
+  id                    String               @id @default(uuid()) @db.Uuid
+  projectId             String               @map("project_id") @db.Uuid
+  project               Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bucketId              String               @map("bucket_id") @db.Uuid
+  bucket                Bucket               @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  ownerUserId           String               @map("owner_user_id") @db.Uuid
+  owner                 User                 @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  resolvedIntegrationId String?              @map("resolved_integration_id") @db.Uuid
+  resolvedIntegration   ProviderIntegration? @relation("ResolvedIntegration", fields: [resolvedIntegrationId], references: [id], onDelete: SetNull)
+  key                   String
+  provider              Provider
+  providerFileId        String?              @map("provider_file_id")
+  fileName              String               @map("file_name")
+  contentType           String               @map("content_type")
+  sizeBytes             BigInt               @map("size_bytes")
+  checksumSha256        String?              @map("checksum_sha256")
+  status                StorageObjectStatus  @default(PENDING)
+  deletedAt             DateTime?            @map("deleted_at")
+  operationLogs         OperationLog[]
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  @@index([bucketId, key])
+  @@index([projectId, bucketId])
+  @@map("storage_objects")
+}
+
+model OperationLog {
+  id        String          @id @default(uuid()) @db.Uuid
+  projectId String          @map("project_id") @db.Uuid
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String?         @map("user_id") @db.Uuid
+  user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKeyId  String?         @map("api_key_id") @db.Uuid
+  apiKey    ApiKey?         @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  bucketId  String?         @map("bucket_id") @db.Uuid
+  bucket    Bucket?         @relation(fields: [bucketId], references: [id], onDelete: SetNull)
+  objectId  String?         @map("object_id") @db.Uuid
+  object    StorageObject?  @relation(fields: [objectId], references: [id], onDelete: SetNull)
+  operation OperationType
+  status    OperationStatus
+  provider  Provider?
+  errorCode String?         @map("error_code")
+  requestId String          @map("request_id")
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@index([projectId, createdAt])
+  @@index([requestId])
+  @@map("operation_logs")
+}
+
+model OAuthState {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stateHash   String    @map("state_hash")
+  redirectUri String    @map("redirect_uri")
+  expiresAt   DateTime  @map("expires_at")
+  consumedAt  DateTime? @map("consumed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, expiresAt])
+  @@map("oauth_states")
+}

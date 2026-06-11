@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sid3-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sid3
+      POSTGRES_USER: sid3
+      POSTGRES_PASSWORD: sid3
+    ports:
+      - "5432:5432"
+    volumes:
+      - sid3_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sid3 -d sid3"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: sid3-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    profiles:
+      - optional
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sid3-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://sid3:sid3@postgres:5432/sid3?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:4200/connections/google/callback}
+      GOOGLE_DRIVE_SCOPES: ${GOOGLE_DRIVE_SCOPES:-https://www.googleapis.com/auth/drive.file}
+    ports:
+      - "3000:3000"
+
+volumes:
+  sid3_postgres_data:
