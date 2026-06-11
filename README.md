@@ -41,14 +41,20 @@ docker compose -f api/docker-compose.yml up -d postgres
 cp api/.env.example api/.env
 ```
 
-4. Gere segredos locais para `JWT_SECRET` e `TOKEN_ENCRYPTION_KEY`:
+4. Crie o ambiente do dashboard:
+
+```bash
+cp dashboard/.env.example dashboard/.env
+```
+
+5. Gere segredos locais para `JWT_SECRET` e `TOKEN_ENCRYPTION_KEY`:
 
 ```bash
 openssl rand -base64 32
 openssl rand -base64 32
 ```
 
-5. Prepare o Prisma:
+6. Prepare o Prisma:
 
 ```bash
 cd api
@@ -56,14 +62,14 @@ pnpm prisma:generate
 pnpm prisma:migrate
 ```
 
-6. Inicie a API:
+7. Inicie a API:
 
 ```bash
 cd api
 pnpm start:dev
 ```
 
-7. Em outro terminal, inicie o dashboard:
+8. Em outro terminal, inicie o dashboard:
 
 ```bash
 cd dashboard
@@ -135,7 +141,9 @@ Essa pasta é ignorada pelo Git, assim como `client_secret_*.json` e extensões 
 Resumo do que precisa existir localmente para integração real com Google Drive:
 
 - `api/.env` preenchido com `GOOGLE_OAUTH_CLIENT_ID` e `GOOGLE_OAUTH_CLIENT_SECRET`
+- `dashboard/.env` preenchido com `SID3_API_BASE_URL`
 - `GOOGLE_OAUTH_REDIRECT_URI` apontando para `http://localhost:4200/connections/google/callback`
+- `SID3_API_BASE_URL` apontando para a API que o dashboard deve consumir
 - `Google Drive API` ativada no projeto do Google Cloud
 - seu usuário autorizado na tela de consentimento, se a aplicação estiver em modo de teste
 - credencial JSON, se você quiser guardá-la localmente, dentro de `secrets/`
@@ -158,6 +166,17 @@ Dashboard:
 cd dashboard
 pnpm typecheck
 pnpm build
+```
+
+Docker do dashboard:
+
+```bash
+docker build \
+  --build-arg SID3_API_BASE_URL="$(grep '^SID3_API_BASE_URL=' dashboard/.env | cut -d= -f2-)" \
+  -t sid3-dashboard \
+  ./dashboard
+
+docker run --rm -p 8080:80 sid3-dashboard
 ```
 
 Secret scan:

@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "node ../scripts/write-dashboard-runtime-config.mjs",
+    "prestart": "node ../scripts/write-dashboard-runtime-config.mjs",
+    "prelint": "node ../scripts/write-dashboard-runtime-config.mjs",
+    "pretypecheck": "node ../scripts/write-dashboard-runtime-config.mjs",
     "build": "ng build",
     "start": "ng serve --host localhost --port 4200",
     "lint": "ng build --configuration development",

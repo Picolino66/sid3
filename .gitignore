@@ -31,3 +31,4 @@ Thumbs.db
 .idea/
 .vscode/
 .history/
+dashboard/public/runtime-config.js
