@@ -177,6 +177,37 @@ describe(ConnectionsService.name, () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('loads OAuth diagnostics when the state hash exists but is already consumed or expired', async () => {
+    oauthStateDelegate.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'consumed-state-id',
+        consumedAt: new Date('2026-05-24T13:10:00.000Z'),
+        expiresAt: new Date(Date.now() - 60_000)
+      });
+
+    await expect(
+      service.completeGoogleConnection(userId, {
+        code: 'google-code',
+        state: 'state-value-with-enough-length-123456'
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(oauthStateDelegate.findFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it('rethrows provider exchange errors after logging the callback failure', async () => {
+    oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id' });
+    googleOAuthClient.exchangeCode.mockRejectedValue(new Error('oauth exchange failed code=abc123'));
+
+    await expect(
+      service.completeGoogleConnection(userId, {
+        code: 'google-code',
+        state: 'state-value-with-enough-length-123456'
+      })
+    ).rejects.toThrow('oauth exchange failed code=abc123');
+  });
+
   it('lists connections owned by the authenticated user', async () => {
     providerIntegrationDelegate.findMany.mockResolvedValue([persistedConnection]);
 
@@ -264,5 +295,11 @@ describe(ConnectionsService.name, () => {
     userDelegate.findUnique.mockResolvedValue(null);
 
     await expect(service.listConnections(userId)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects Google authorization URL creation when user no longer exists', async () => {
+    userDelegate.findUnique.mockResolvedValue(null);
+
+    await expect(service.createGoogleAuthorizationUrl(userId)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

@@ -98,6 +98,45 @@ describe(GoogleDriveStorageProvider.name, () => {
     });
   });
 
+  it('uploads an object without parent folder and falls back to input metadata', async () => {
+    driveCreate.mockResolvedValue({
+      data: {
+        id: 'google-file-id-2'
+      }
+    });
+
+    const response = await provider.uploadObject({
+      integration: {
+        ...integration,
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
+      },
+      fileName: 'notes.txt',
+      contentType: 'text/plain',
+      content: Buffer.from('hello')
+    });
+
+    expect(setCredentials).toHaveBeenCalledWith({
+      access_token: 'access',
+      refresh_token: undefined,
+      expiry_date: undefined
+    });
+    expect(driveCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: {
+          name: 'notes.txt',
+          parents: undefined
+        }
+      })
+    );
+    expect(response).toEqual({
+      providerFileId: 'google-file-id-2',
+      fileName: 'notes.txt',
+      contentType: 'text/plain',
+      sizeBytes: Buffer.from('hello').byteLength
+    });
+  });
+
   it('downloads an object stream and metadata', async () => {
     const stream = Readable.from(Buffer.from('file'));
     driveGet
@@ -125,6 +164,29 @@ describe(GoogleDriveStorageProvider.name, () => {
     });
   });
 
+  it('downloads an object with nullable metadata fallback', async () => {
+    const stream = Readable.from(Buffer.from('file'));
+    driveGet
+      .mockResolvedValueOnce({
+        data: {}
+      })
+      .mockResolvedValueOnce({
+        data: stream
+      });
+
+    const response = await provider.downloadObject({
+      integration,
+      providerFileId: 'google-file-id'
+    });
+
+    expect(response).toEqual({
+      stream,
+      fileName: null,
+      contentType: null,
+      sizeBytes: null
+    });
+  });
+
   it('deletes an object through Google Drive', async () => {
     driveDelete.mockResolvedValue({});
 
@@ -140,6 +202,34 @@ describe(GoogleDriveStorageProvider.name, () => {
 
   it('maps provider failures to bad gateway errors', async () => {
     driveCreate.mockRejectedValue(new Error('quota exceeded'));
+
+    await expect(
+      provider.uploadObject({
+        integration,
+        fileName: 'avatar.png',
+        contentType: 'image/png',
+        content: Buffer.from('file')
+      })
+    ).rejects.toBeInstanceOf(BadGatewayException);
+  });
+
+  it('rethrows existing bad gateway errors without wrapping again', async () => {
+    driveDelete.mockRejectedValue(new BadGatewayException('Google Drive delete failed'));
+
+    await expect(
+      provider.deleteObject({
+        integration,
+        providerFileId: 'google-file-id'
+      })
+    ).rejects.toBeInstanceOf(BadGatewayException);
+  });
+
+  it('fails upload when Google Drive does not return a file id', async () => {
+    driveCreate.mockResolvedValue({
+      data: {
+        name: 'avatar.png'
+      }
+    });
 
     await expect(
       provider.uploadObject({

@@ -135,4 +135,34 @@ describe(AuthService.name, () => {
       })
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('rejects login when user is not found', async () => {
+    userDelegate.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.login({
+        email: 'dev@example.com',
+        password: 'wrong-password'
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('returns the current authenticated user', async () => {
+    userDelegate.findUnique.mockResolvedValue(persistedUser);
+
+    const response = await service.getCurrentUser(persistedUser.id);
+
+    expect(response).toEqual({
+      id: persistedUser.id,
+      email: persistedUser.email,
+      name: persistedUser.name,
+      createdAt: persistedUser.createdAt.toISOString()
+    });
+  });
+
+  it('rejects current user lookup when token user no longer exists', async () => {
+    userDelegate.findUnique.mockResolvedValue(null);
+
+    await expect(service.getCurrentUser(persistedUser.id)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
 });
