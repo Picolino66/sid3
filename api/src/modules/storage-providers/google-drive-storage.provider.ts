@@ -99,6 +99,85 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     }
   }
 
+  async findFolderByName(
+    name: string,
+    integration: StorageProviderIntegrationCredentials,
+    parentFolderId?: string
+  ): Promise<string | null> {
+    const drive = this.createDriveClient(integration);
+    const escapedName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const parentClause = parentFolderId ? `'${parentFolderId}' in parents` : `'root' in parents`;
+
+    try {
+      const response = await drive.files.list({
+        q: `mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and ${parentClause} and trashed = false`,
+        fields: 'files(id)',
+        pageSize: 1
+      });
+
+      return response.data.files?.[0]?.id ?? null;
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive folder search failed');
+    }
+  }
+
+  async createFolder(
+    name: string,
+    integration: StorageProviderIntegrationCredentials,
+    parentFolderId?: string
+  ): Promise<string> {
+    const drive = this.createDriveClient(integration);
+    const parents = parentFolderId ? [parentFolderId] : undefined;
+
+    try {
+      const response = await drive.files.create({
+        requestBody: {
+          name,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents
+        },
+        fields: 'id'
+      });
+
+      if (!response.data.id) {
+        throw new BadGatewayException('Google Drive did not return a folder id');
+      }
+
+      return response.data.id;
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive folder creation failed');
+    }
+  }
+
+  async findOrCreateFolder(
+    name: string,
+    integration: StorageProviderIntegrationCredentials,
+    parentFolderId?: string
+  ): Promise<string> {
+    const existing = await this.findFolderByName(name, integration, parentFolderId);
+    if (existing) {
+      return existing;
+    }
+    return this.createFolder(name, integration, parentFolderId);
+  }
+
+  async getDriveQuota(
+    integration: StorageProviderIntegrationCredentials
+  ): Promise<{ limitBytes: string | null; usageBytes: string; usageInDriveBytes: string }> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.about.get({ fields: 'storageQuota' });
+      const quota = response.data.storageQuota;
+      return {
+        limitBytes: quota?.limit ?? null,
+        usageBytes: quota?.usage ?? '0',
+        usageInDriveBytes: quota?.usageInDrive ?? '0'
+      };
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive quota fetch failed');
+    }
+  }
+
   private createDriveClient(integration: StorageProviderIntegrationCredentials): drive_v3.Drive {
     const client = this.createOAuthClient();
     client.setCredentials({

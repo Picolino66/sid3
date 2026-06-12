@@ -32,3 +32,4 @@ Thumbs.db
 .vscode/
 .history/
 dashboard/public/runtime-config.js
+.manager/*

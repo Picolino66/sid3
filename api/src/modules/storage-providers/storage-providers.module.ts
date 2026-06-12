@@ -5,6 +5,6 @@ import { StorageProviderRegistry } from './storage-provider.registry';
 
 @Module({
   providers: [GoogleDriveStorageProvider, StorageProviderRegistry, TokenEncryptionService],
-  exports: [StorageProviderRegistry]
+  exports: [StorageProviderRegistry, GoogleDriveStorageProvider]
 })
 export class StorageProvidersModule {}

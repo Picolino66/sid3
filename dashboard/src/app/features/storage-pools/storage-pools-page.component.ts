@@ -15,8 +15,7 @@ import { StoragePoolsService } from './storage-pools.service';
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Armazenamento</p>
-        <h1>Pools de Armazenamento</h1>
+        <h1>Pools de Armazenamento <span class="badge-advanced">Avançado</span></h1>
       </div>
     </header>
 
@@ -24,7 +23,7 @@ import { StoragePoolsService } from './storage-pools.service';
       <form class="panel" [formGroup]="form" (ngSubmit)="createPool()">
         <header>
           <h2>Criar pool</h2>
-          <p>Um pool de armazenamento agrupa múltiplas conexões para roteamento automático de uploads.</p>
+          <p class="muted">Para distribuir uploads entre múltiplas contas Google Drive automaticamente.</p>
         </header>
 
         <label>
@@ -44,11 +43,16 @@ import { StoragePoolsService } from './storage-pools.service';
         <label>
           Estratégia de roteamento
           <select formControlName="strategy">
-            <option value="ROUND_ROBIN">Circular (Round Robin)</option>
-            <option value="FILL_FIRST">Preencher primeiro (Fill First)</option>
-            <option value="WEIGHTED">Ponderado (Weighted)</option>
+            <option value="ROUND_ROBIN" title="Distribui igualmente entre os drives">Circular (Round Robin)</option>
+            <option value="FILL_FIRST" title="Usa o drive com mais espaço livre">Preencher primeiro (Fill First)</option>
+            <option value="WEIGHTED" title="Prioriza drives conforme peso configurado">Ponderado (Weighted)</option>
           </select>
         </label>
+        <p class="field-hint">
+          @if (form.controls.strategy.value === 'ROUND_ROBIN') { Distribui igualmente entre os drives. }
+          @else if (form.controls.strategy.value === 'FILL_FIRST') { Usa o drive com mais espaço livre. }
+          @else if (form.controls.strategy.value === 'WEIGHTED') { Prioriza drives conforme peso configurado. }
+        </p>
 
         @if (errorMessage()) {
           <p class="form-error">{{ errorMessage() }}</p>
@@ -67,41 +71,59 @@ import { StoragePoolsService } from './storage-pools.service';
         @if (isLoading()) {
           <p class="muted">Carregando pools...</p>
         } @else if (pools().length === 0) {
-          <p class="empty-state">Nenhum pool de armazenamento para este projeto.</p>
+          <p class="empty-state">Nenhum pool para este projeto. Crie o primeiro ao lado.</p>
         } @else {
-          @for (pool of pools(); track pool.id) {
-            <div class="pool-card">
-              <div class="pool-header">
-                <strong>{{ pool.name }}</strong>
-                <span class="badge">{{ pool.strategy }}</span>
-                <button class="secondary compact-button" type="button" (click)="deletePool(pool)">Excluir</button>
-              </div>
-
-              <p class="muted">{{ pool.members.length }} conexão(ões)</p>
-
-              @for (member of pool.members; track member.id) {
-                <div class="pool-member">
-                  <span>{{ member.displayName ?? member.provider }}</span>
-                  <span class="muted">{{ member.providerAccountEmail ?? '—' }}</span>
-                  <span class="badge">{{ member.connectionStatus }}</span>
-                  <button
-                    class="secondary compact-button"
-                    type="button"
-                    (click)="removeMember(pool, member.id)"
-                  >Remover</button>
+          <div class="pool-list">
+            @for (pool of pools(); track pool.id) {
+              <div class="pool-card">
+                <div class="pool-card-header">
+                  <div class="pool-card-title">
+                    <strong>{{ pool.name }}</strong>
+                    <span class="pool-strategy-label">{{ strategyLabel(pool.strategy) }}</span>
+                  </div>
+                  <button class="danger compact-button" type="button" (click)="deletePool(pool)">Excluir</button>
                 </div>
-              }
 
-              <div class="add-member">
-                <select [id]="'add-member-' + pool.id" (change)="addMember(pool, $event)">
-                  <option value="">— Adicionar conexão —</option>
-                  @for (conn of availableConnections(pool); track conn.id) {
-                    <option [value]="conn.id">{{ conn.displayName ?? conn.provider }}</option>
-                  }
-                </select>
+                @if (pool.members.length === 0) {
+                  <p class="muted pool-empty">Nenhuma conexão adicionada.</p>
+                } @else {
+                  <div class="pool-members-table">
+                    <div class="pool-members-head">
+                      <span>Conexão</span>
+                      <span>Conta</span>
+                      <span>Status</span>
+                      <span></span>
+                    </div>
+                    @for (member of pool.members; track member.id) {
+                      <div class="pool-members-row">
+                        <span>{{ member.displayName ?? 'Google Drive' }}</span>
+                        <span class="muted">{{ member.providerAccountEmail ?? '—' }}</span>
+                        <span>
+                          <span [class]="'status-label ' + member.connectionStatus.toLowerCase()">
+                            {{ member.connectionStatus === 'CONNECTED' ? 'Conectado' : member.connectionStatus === 'REVOKED' ? 'Revogado' : 'Erro' }}
+                          </span>
+                        </span>
+                        <span>
+                          <button class="danger compact-button" type="button" (click)="removeMember(pool, member.id)">
+                            Remover
+                          </button>
+                        </span>
+                      </div>
+                    }
+                  </div>
+                }
+
+                <div class="pool-add-member">
+                  <select (change)="addMember(pool, $event)">
+                    <option value="">+ Adicionar conexão ao pool</option>
+                    @for (conn of availableConnections(pool); track conn.id) {
+                      <option [value]="conn.id">{{ conn.displayName ?? 'Google Drive' }}{{ conn.providerAccountEmail ? ' — ' + conn.providerAccountEmail : '' }}</option>
+                    }
+                  </select>
+                </div>
               </div>
-            </div>
-          }
+            }
+          </div>
         }
       </section>
     </section>
@@ -128,6 +150,15 @@ export class StoragePoolsPageComponent {
     name: ['', [Validators.required, Validators.minLength(1), Validators.maxLength(100)]],
     strategy: ['ROUND_ROBIN']
   });
+
+  protected strategyLabel(strategy: string): string {
+    const labels: Record<string, string> = {
+      ROUND_ROBIN: 'Circular',
+      FILL_FIRST: 'Preencher primeiro',
+      WEIGHTED: 'Ponderado'
+    };
+    return labels[strategy] ?? strategy;
+  }
 
   protected availableConnections(pool: StoragePool): Connection[] {
     const memberConnectionIds = new Set(pool.members.map((m) => m.connectionId));

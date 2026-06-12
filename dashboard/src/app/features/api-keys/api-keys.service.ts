@@ -17,6 +17,10 @@ export class ApiKeysService {
     return this.http.post<ApiKeyCreated>(`${this.apiBaseUrl}/projects/${projectId}/api-keys`, request);
   }
 
+  regenerateApiKey(projectId: string, apiKeyId: string): Observable<ApiKeyCreated> {
+    return this.http.post<ApiKeyCreated>(`${this.apiBaseUrl}/projects/${projectId}/api-keys/${apiKeyId}/regenerate`, {});
+  }
+
   revokeApiKey(projectId: string, apiKeyId: string): Observable<void> {
     return this.http.delete<void>(`${this.apiBaseUrl}/projects/${projectId}/api-keys/${apiKeyId}`);
   }

@@ -18,11 +18,13 @@ import { AuthService } from '../core/auth/auth.service';
         <nav>
           <a routerLink="/projects" routerLinkActive="active">Projetos</a>
           <a routerLink="/connections" routerLinkActive="active">Conexões</a>
-          <a routerLink="/storage-pools" routerLinkActive="active">Pools de Armazenamento</a>
           <a routerLink="/buckets" routerLinkActive="active">Buckets</a>
           <a routerLink="/api-keys" routerLinkActive="active">Chaves de API</a>
-          <a routerLink="/stats" routerLinkActive="active">Estatísticas</a>
           <a routerLink="/files" routerLinkActive="active">Arquivos</a>
+          <span class="nav-group-label">Avançado</span>
+          <a routerLink="/storage-pools" routerLinkActive="active">Pools de Armazenamento</a>
+          <span class="nav-group-label">Monitoramento</span>
+          <a routerLink="/stats" routerLinkActive="active">Estatísticas</a>
           <a routerLink="/logs" routerLinkActive="active">Logs</a>
           <a routerLink="/docs" routerLinkActive="active">Documentação da API</a>
         </nav>

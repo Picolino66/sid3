@@ -8,6 +8,9 @@ export type ConnectionStorageSummary = {
   status: ConnectionStatus;
   sizeBytes: string;
   objectCount: number;
+  driveQuotaLimitBytes: string | null;
+  driveQuotaUsageBytes: string | null;
+  driveQuotaUsageInDriveBytes: string | null;
 };
 
 export type BucketStorageSummary = {

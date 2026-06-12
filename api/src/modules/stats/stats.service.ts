@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { StorageObjectStatus } from '@prisma/client';
+import { GoogleDriveStorageProvider } from '../storage-providers/google-drive-storage.provider';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectionStatsResponseDto } from './dto/connection-stats-response.dto';
 import { ProjectStorageStatsResponseDto } from './dto/project-storage-stats-response.dto';
 
 @Injectable()
 export class StatsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly driveProvider: GoogleDriveStorageProvider
+  ) {}
 
   async getProjectStorageStats(userId: string, projectId: string): Promise<ProjectStorageStatsResponseDto> {
     await this.ensureProjectOwner(userId, projectId);
@@ -34,7 +38,16 @@ export class StatsService {
       }),
       this.prisma.providerIntegration.findMany({
         where: { userId },
-        select: { id: true, provider: true, displayName: true, providerAccountEmail: true, status: true }
+        select: {
+          id: true,
+          provider: true,
+          displayName: true,
+          providerAccountEmail: true,
+          status: true,
+          encryptedAccessToken: true,
+          encryptedRefreshToken: true,
+          tokenExpiresAt: true
+        }
       })
     ]);
 
@@ -66,8 +79,32 @@ export class StatsService {
       }
     }
 
+    const quotaResults = await Promise.allSettled(
+      [...connectionUsage.keys()].map(async (connectionId) => {
+        const conn = connectionMap.get(connectionId);
+        if (!conn || conn.status !== 'CONNECTED') {
+          return { connectionId, quota: null };
+        }
+        const quota = await this.driveProvider.getDriveQuota({
+          provider: conn.provider,
+          encryptedAccessToken: conn.encryptedAccessToken,
+          encryptedRefreshToken: conn.encryptedRefreshToken,
+          tokenExpiresAt: conn.tokenExpiresAt
+        });
+        return { connectionId, quota };
+      })
+    );
+
+    const quotaMap = new Map<string, { limitBytes: string | null; usageBytes: string; usageInDriveBytes: string } | null>();
+    for (const result of quotaResults) {
+      if (result.status === 'fulfilled') {
+        quotaMap.set(result.value.connectionId, result.value.quota);
+      }
+    }
+
     const byConnection = [...connectionUsage.entries()].map(([connectionId, usage]) => {
       const conn = connectionMap.get(connectionId);
+      const quota = quotaMap.get(connectionId) ?? null;
       return {
         connectionId,
         displayName: conn?.displayName ?? null,
@@ -75,7 +112,10 @@ export class StatsService {
         provider: (conn?.provider ?? 'GOOGLE_DRIVE') as ConnectionStatsResponseDto['provider'],
         status: (conn?.status ?? 'CONNECTED') as ConnectionStatsResponseDto['status'],
         sizeBytes: String(usage.sizeBytes),
-        objectCount: usage.objectCount
+        objectCount: usage.objectCount,
+        driveQuotaLimitBytes: quota?.limitBytes ?? null,
+        driveQuotaUsageBytes: quota?.usageBytes ?? null,
+        driveQuotaUsageInDriveBytes: quota?.usageInDriveBytes ?? null
       };
     });
 
@@ -93,7 +133,16 @@ export class StatsService {
   async getConnectionStats(userId: string, connectionId: string): Promise<ConnectionStatsResponseDto> {
     const connection = await this.prisma.providerIntegration.findFirst({
       where: { id: connectionId, userId },
-      select: { id: true, provider: true, displayName: true, providerAccountEmail: true, status: true }
+      select: {
+        id: true,
+        provider: true,
+        displayName: true,
+        providerAccountEmail: true,
+        status: true,
+        encryptedAccessToken: true,
+        encryptedRefreshToken: true,
+        tokenExpiresAt: true
+      }
     });
 
     if (!connection) {
@@ -124,6 +173,16 @@ export class StatsService {
       (byResolved._sum.sizeBytes ?? BigInt(0)) + (byDirectBuckets._sum.sizeBytes ?? BigInt(0));
     const totalCount = byResolved._count.id + byDirectBuckets._count.id;
 
+    let quota: { limitBytes: string | null; usageBytes: string; usageInDriveBytes: string } | null = null;
+    if (connection.status === 'CONNECTED') {
+      quota = await this.driveProvider.getDriveQuota({
+        provider: connection.provider,
+        encryptedAccessToken: connection.encryptedAccessToken,
+        encryptedRefreshToken: connection.encryptedRefreshToken,
+        tokenExpiresAt: connection.tokenExpiresAt
+      }).catch(() => null);
+    }
+
     return {
       connectionId: connection.id,
       displayName: connection.displayName,
@@ -131,7 +190,10 @@ export class StatsService {
       provider: connection.provider,
       status: connection.status,
       sizeBytes: String(totalBytes),
-      objectCount: totalCount
+      objectCount: totalCount,
+      driveQuotaLimitBytes: quota?.limitBytes ?? null,
+      driveQuotaUsageBytes: quota?.usageBytes ?? null,
+      driveQuotaUsageInDriveBytes: quota?.usageInDriveBytes ?? null
     };
   }
 

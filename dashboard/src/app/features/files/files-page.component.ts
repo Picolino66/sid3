@@ -19,7 +19,6 @@ import { StorageObject } from './storage-object.models';
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Objetos</p>
         <h1>Arquivos</h1>
       </div>
       <button type="button" [disabled]="!canListObjects() || isLoading()" (click)="loadObjects()">
@@ -30,8 +29,7 @@ import { StorageObject } from './storage-object.models';
     <section class="split-layout">
       <form class="panel" [formGroup]="form" (ngSubmit)="uploadObject()">
         <header>
-          <h2>Enviar objeto</h2>
-          <p>Operações de objetos usam uma chave de API do projeto, simulando o comportamento de clientes externos.</p>
+          <h2>Enviar arquivo</h2>
         </header>
 
         <label>
@@ -65,11 +63,11 @@ import { StorageObject } from './storage-object.models';
           Segredo da chave de API
           <input type="password" formControlName="apiKeySecret" placeholder="sid3_live_..." autocomplete="off" />
         </label>
-        <p class="field-hint">Use o segredo completo exibido uma única vez ao criar a chave de API, não apenas o prefixo.</p>
+        <p class="field-hint">Cole o segredo exibido ao criar a chave — não é o prefixo.</p>
 
         <label>
-          Chave do objeto
-          <input type="text" formControlName="key" placeholder="avatares/usuario-1.png" />
+          Caminho do arquivo
+          <input type="text" formControlName="key" placeholder="fotos/minha-foto.png" />
         </label>
 
         <label>
@@ -97,7 +95,6 @@ import { StorageObject } from './storage-object.models';
       <section class="panel">
         <header>
           <h2>{{ selectedBucket()?.name ?? 'Arquivos do bucket' }}</h2>
-          <p>Os objetos disponíveis podem ser baixados ou excluídos usando o segredo da chave de API.</p>
         </header>
 
         <label class="inline-filter">
@@ -108,7 +105,7 @@ import { StorageObject } from './storage-object.models';
         @if (isLoading()) {
           <p class="muted">Carregando objetos...</p>
         } @else if (objects().length === 0) {
-          <p class="empty-state">Nenhum objeto carregado para este bucket.</p>
+          <p class="empty-state">Nenhum arquivo enviado para este bucket ainda.</p>
         } @else {
           <div class="table files-table" role="table" aria-label="Arquivos">
             <div role="row" class="head">
@@ -123,12 +120,16 @@ import { StorageObject } from './storage-object.models';
               <div role="row">
                 <span role="cell">{{ object.key }}</span>
                 <span role="cell">{{ object.contentType }}</span>
-                <span role="cell">{{ object.sizeBytes }} B</span>
-                <span role="cell"><span class="badge">{{ object.status }}</span></span>
-                <span role="cell">{{ object.updatedAt | date: 'short' }}</span>
+                <span role="cell">{{ formatBytes(object.sizeBytes) }}</span>
+                <span role="cell">
+                  <span [class]="'status-label ' + objectStatusClass(object.status)">
+                    {{ objectStatusLabel(object.status) }}
+                  </span>
+                </span>
+                <span role="cell">{{ object.updatedAt | date: 'dd/MM/yyyy HH:mm' }}</span>
                 <span role="cell" class="action-cell">
-                  <button class="secondary compact-button" type="button" (click)="download(object)">Baixar</button>
-                  <button class="secondary compact-button" type="button" (click)="deleteObject(object)">Excluir</button>
+                  <button class="compact-button" type="button" (click)="download(object)">Baixar</button>
+                  <button class="danger compact-button" type="button" (click)="deleteObject(object)">Excluir</button>
                 </span>
               </div>
             }
@@ -175,19 +176,19 @@ export class FilesPageComponent {
     const requirements: string[] = [];
 
     if (!this.selectedBucketId()) {
-      requirements.push('Crie ou selecione um bucket.');
+      requirements.push('Selecione um bucket.');
     }
 
     if (this.activeApiKeys().length === 0) {
-      requirements.push('Crie uma chave de API ativa.');
+      requirements.push('Selecione uma chave de API ativa.');
     }
 
     if (this.form.controls.apiKeySecret.invalid) {
-      requirements.push('Cole o segredo completo da chave de API.');
+      requirements.push('Cole o segredo da chave.');
     }
 
     if (this.form.controls.key.invalid) {
-      requirements.push('Informe a chave do objeto.');
+      requirements.push('Informe o caminho do arquivo.');
     }
 
     if (!this.selectedFile()) {
@@ -303,6 +304,31 @@ export class FilesPageComponent {
       next: () => this.objects.update((objects) => objects.filter((item) => item.id !== object.id)),
       error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
     });
+  }
+
+  protected formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+
+  protected objectStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      AVAILABLE: 'Disponível',
+      PENDING: 'Pendente',
+      DELETING: 'Excluindo',
+      DELETED: 'Excluído',
+      FAILED: 'Falhou'
+    };
+    return labels[status] ?? status;
+  }
+
+  protected objectStatusClass(status: string): string {
+    if (status === 'AVAILABLE') return 'connected';
+    if (status === 'FAILED' || status === 'DELETED') return 'revoked';
+    return 'error';
   }
 
   private loadProjects(): void {

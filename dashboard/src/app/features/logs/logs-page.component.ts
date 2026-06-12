@@ -13,73 +13,59 @@ import { OperationLogsService } from './operation-logs.service';
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Trilha de auditoria</p>
         <h1>Logs de operações</h1>
       </div>
-      <button type="button" [disabled]="!selectedProjectId() || isLoading()" (click)="loadLogs()">
-        {{ isLoading() ? 'Carregando...' : 'Atualizar' }}
-      </button>
+      <div class="logs-topbar-controls">
+        <select class="topbar-select" [value]="selectedProjectId()" (change)="selectProject($event)">
+          @for (project of projects(); track project.id) {
+            <option [value]="project.id">{{ project.name }}</option>
+          }
+        </select>
+        <div class="logs-limit-control">
+          <label for="logs-limit">Limite</label>
+          <input id="logs-limit" type="number" min="1" max="100" [value]="limit()" (input)="setLimit($event)" />
+        </div>
+        <button type="button" [disabled]="!selectedProjectId() || isLoading()" (click)="loadLogs()">
+          {{ isLoading() ? 'Carregando...' : 'Atualizar' }}
+        </button>
+      </div>
     </header>
 
-    <section class="split-layout">
-      <section class="panel">
-        <header>
-          <h2>Filtros</h2>
-          <p>Os logs são filtrados pelo projeto selecionado e ordenados do mais recente ao mais antigo.</p>
-        </header>
+    @if (errorMessage()) {
+      <p class="form-error">{{ errorMessage() }}</p>
+    }
 
-        <label>
-          Projeto
-          <select [value]="selectedProjectId()" (change)="selectProject($event)">
-            @for (project of projects(); track project.id) {
-              <option [value]="project.id">{{ project.name }}</option>
-            }
-          </select>
-        </label>
-
-        <label>
-          Limite
-          <input type="number" min="1" max="100" [value]="limit()" (input)="setLimit($event)" />
-        </label>
-
-        @if (errorMessage()) {
-          <p class="form-error">{{ errorMessage() }}</p>
-        }
-      </section>
-
-      <section class="panel">
-        <header>
-          <h2>{{ selectedProject()?.name ?? 'Logs do projeto' }}</h2>
-          <p>Identificadores de requisição e referências de objetos ajudam a rastrear a atividade da API externa.</p>
-        </header>
-
-        @if (isLoading()) {
-          <p class="muted">Carregando logs...</p>
-        } @else if (logs().length === 0) {
-          <p class="empty-state">Nenhum log para este projeto ainda.</p>
-        } @else {
-          <div class="table logs-table" role="table" aria-label="Logs de operações">
-            <div role="row" class="head">
-              <span role="columnheader">Operação</span>
-              <span role="columnheader">Status</span>
-              <span role="columnheader">Bucket</span>
-              <span role="columnheader">Objeto</span>
-              <span role="columnheader">Requisição</span>
-              <span role="columnheader">Criado em</span>
-            </div>
-            @for (log of logs(); track log.id) {
-              <div role="row">
-                <span role="cell">{{ log.operation }}</span>
-                <span role="cell"><span class="badge">{{ log.status }}</span></span>
-                <span role="cell">{{ shortId(log.bucketId) }}</span>
-                <span role="cell">{{ shortId(log.objectId) }}</span>
-                <span role="cell">{{ shortId(log.requestId) }}</span>
-                <span role="cell">{{ log.createdAt | date: 'short' }}</span>
-              </div>
-            }
+    <section class="panel">
+      @if (isLoading()) {
+        <p class="muted">Carregando logs...</p>
+      } @else if (logs().length === 0) {
+        <p class="empty-state">Nenhum log para este projeto ainda.</p>
+      } @else {
+        <div class="table logs-table" role="table" aria-label="Logs de operações">
+          <div role="row" class="head">
+            <span role="columnheader">Operação</span>
+            <span role="columnheader">Status</span>
+            <span role="columnheader">Bucket</span>
+            <span role="columnheader">Objeto</span>
+            <span role="columnheader">Requisição</span>
+            <span role="columnheader">Criado em</span>
           </div>
-        }
-      </section>
+          @for (log of logs(); track log.id) {
+            <div role="row">
+              <span role="cell">{{ operationLabel(log.operation) }}</span>
+              <span role="cell">
+                <span [class]="'status-label ' + (log.status === 'SUCCESS' ? 'connected' : 'revoked')">
+                  {{ log.status === 'SUCCESS' ? 'Sucesso' : 'Falha' }}
+                </span>
+              </span>
+              <span role="cell"><code class="log-id">{{ shortId(log.bucketId) }}</code></span>
+              <span role="cell"><code class="log-id">{{ shortId(log.objectId) }}</code></span>
+              <span role="cell"><code class="log-id">{{ shortId(log.requestId) }}</code></span>
+              <span role="cell">{{ log.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
+            </div>
+          }
+        </div>
+      }
     </section>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -125,6 +111,20 @@ export class LogsPageComponent {
         next: (logs) => this.logs.set(logs),
         error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
       });
+  }
+
+  protected operationLabel(operation: string): string {
+    const labels: Record<string, string> = {
+      UPLOAD: 'Upload',
+      DOWNLOAD: 'Download',
+      LIST: 'Listagem',
+      DELETE: 'Exclusão',
+      OAUTH_CONNECT: 'Conexão OAuth',
+      OAUTH_REVOKE: 'Revogação OAuth',
+      API_KEY_CREATE: 'Criação de chave',
+      API_KEY_REVOKE: 'Revogação de chave'
+    };
+    return labels[operation] ?? operation;
   }
 
   protected shortId(value: string | null): string {

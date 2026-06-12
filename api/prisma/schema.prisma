@@ -113,6 +113,7 @@ model ProviderIntegration {
   buckets               Bucket[]
   poolMemberships       StoragePoolMember[]
   resolvedObjects       StorageObject[]           @relation("ResolvedIntegration")
+  bucketFolderRefs      BucketFolderRef[]
   createdAt             DateTime                  @default(now()) @map("created_at")
   updatedAt             DateTime                  @updatedAt @map("updated_at")
 
@@ -161,11 +162,25 @@ model Bucket {
   providerRootRef       String?              @map("provider_root_ref")
   storageObjects        StorageObject[]
   operationLogs         OperationLog[]
+  folderRefs            BucketFolderRef[]
   createdAt             DateTime             @default(now()) @map("created_at")
   updatedAt             DateTime             @updatedAt @map("updated_at")
 
   @@unique([projectId, name])
   @@map("buckets")
+}
+
+model BucketFolderRef {
+  id                    String              @id @default(uuid()) @db.Uuid
+  bucketId              String              @map("bucket_id") @db.Uuid
+  bucket                Bucket              @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  providerIntegrationId String              @map("provider_integration_id") @db.Uuid
+  providerIntegration   ProviderIntegration @relation(fields: [providerIntegrationId], references: [id], onDelete: Cascade)
+  folderId              String              @map("folder_id")
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  @@unique([bucketId, providerIntegrationId])
+  @@map("bucket_folder_refs")
 }
 
 model StorageObject {

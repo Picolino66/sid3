@@ -22,6 +22,15 @@ export class ConnectionStorageSummaryDto {
 
   @ApiProperty()
   objectCount!: number;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Total Drive storage limit in bytes (null = unlimited)' })
+  driveQuotaLimitBytes!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Total Drive storage usage in bytes' })
+  driveQuotaUsageBytes!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Drive storage usage by Drive files in bytes' })
+  driveQuotaUsageInDriveBytes!: string | null;
 }
 
 export class ConnectionStatsResponseDto extends ConnectionStorageSummaryDto {}

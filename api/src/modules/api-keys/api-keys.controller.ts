@@ -43,6 +43,17 @@ export class ApiKeysController {
     return this.apiKeysService.createApiKey(user.id, projectId, request);
   }
 
+  @Post(':apiKeyId/regenerate')
+  @ApiCreatedResponse({ type: ApiKeyCreatedResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Invalid or missing bearer token' })
+  regenerateApiKey(
+    @CurrentUserContext() user: CurrentUser,
+    @Param('projectId') projectId: string,
+    @Param('apiKeyId') apiKeyId: string
+  ): Promise<ApiKeyCreatedResponseDto> {
+    return this.apiKeysService.regenerateApiKey(user.id, projectId, apiKeyId);
+  }
+
   @Delete(':apiKeyId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse({ description: 'Revoked' })

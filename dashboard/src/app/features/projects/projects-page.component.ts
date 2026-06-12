@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { toApiErrorMessage } from '../../core/api/api-error';
 import { Project } from './project.models';
@@ -8,39 +9,18 @@ import { ProjectsService } from './projects.service';
 
 @Component({
   selector: 'sid3-projects-page',
-  imports: [DatePipe, ReactiveFormsModule],
+  imports: [DatePipe, ReactiveFormsModule, RouterLink],
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Espaço de trabalho</p>
         <h1>Projetos</h1>
       </div>
     </header>
-
-    <section class="status-grid" aria-label="Status de configuração">
-      <article>
-        <span class="ready">pronto</span>
-        <strong>Identidade</strong>
-      </article>
-      <article>
-        <span class="ready">pronto</span>
-        <strong>Projetos</strong>
-      </article>
-      <article>
-        <span>próximo</span>
-        <strong>Conexões</strong>
-      </article>
-      <article>
-        <span>próximo</span>
-        <strong>Primeiro upload</strong>
-      </article>
-    </section>
 
     <section class="split-layout">
       <form class="panel" [formGroup]="form" (ngSubmit)="createProject()">
         <header>
           <h2>Criar projeto</h2>
-          <p>Projetos isolam chaves de API, buckets, conexões e objetos.</p>
         </header>
         <label>
           Nome
@@ -59,13 +39,15 @@ import { ProjectsService } from './projects.service';
       <section class="panel">
         <header>
           <h2>Seus projetos</h2>
-          <p>Somente projetos do usuário autenticado são exibidos.</p>
         </header>
 
         @if (isLoading()) {
           <p class="muted">Carregando projetos...</p>
         } @else if (projects().length === 0) {
-          <p class="empty-state">Nenhum projeto ainda.</p>
+          <div class="empty-cta">
+            <strong>Bem-vindo ao SID3</strong>
+            <p class="muted">Crie seu primeiro projeto para começar a usar o gateway de armazenamento.</p>
+          </div>
         } @else {
           <div class="table" role="table" aria-label="Projetos">
             <div role="row" class="head">
@@ -84,6 +66,39 @@ import { ProjectsService } from './projects.service';
         }
       </section>
     </section>
+
+    @if (!isLoading() && projects().length > 0) {
+      <section class="setup-guide panel">
+        <h2>Próximos passos</h2>
+        <p class="muted">Siga essa sequência para começar a enviar arquivos.</p>
+        <ol class="setup-steps">
+          <li class="step done">
+            <span class="step-check">✓</span>
+            <span>Projeto criado</span>
+          </li>
+          <li class="step">
+            <span class="step-number">2</span>
+            <span>Conecte uma conta Google Drive</span>
+            <a routerLink="/connections" class="step-link">Ir para Conexões</a>
+          </li>
+          <li class="step">
+            <span class="step-number">3</span>
+            <span>Crie um bucket de armazenamento</span>
+            <a routerLink="/buckets" class="step-link">Ir para Buckets</a>
+          </li>
+          <li class="step">
+            <span class="step-number">4</span>
+            <span>Gere uma chave de API</span>
+            <a routerLink="/api-keys" class="step-link">Ir para Chaves de API</a>
+          </li>
+          <li class="step">
+            <span class="step-number">5</span>
+            <span>Faça o primeiro upload</span>
+            <a routerLink="/files" class="step-link">Ir para Arquivos</a>
+          </li>
+        </ol>
+      </section>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
 })

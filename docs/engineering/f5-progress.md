@@ -98,6 +98,19 @@ F5 is in progress. The MVP product flow foundation is available and the local qu
 - Added interactive Google Drive smoke test script for register/login, OAuth connection, project/API key/bucket creation, upload/list/download/delete, log verification, and API key cleanup.
 - Added Google Drive smoke test runbook.
 
+- Implemented Storage Pool module with ROUND_ROBIN, FILL_FIRST, and WEIGHTED routing strategies.
+- Added `StoragePool` and `StoragePoolMember` entities to Prisma schema and generated migration.
+- Added pool member add/remove endpoints and routing strategy factory.
+- Added Storage Pools dashboard page with pool creation, member management, and strategy selection.
+- Implemented bucket-as-Drive-folder organization: on first upload to a bucket, SID3 finds or creates a Drive folder named after the bucket and stores all files inside it.
+- Added `BucketFolderRef` entity (Prisma migration `add_bucket_folder_refs`) for caching folder IDs per pool member drive.
+- Added `findFolderByName`, `createFolder`, and `findOrCreateFolder` to `GoogleDriveStorageProvider`.
+- Added `resolveBucketFolderOnDrive` to `ObjectsService` with race-condition handling via `P2002` fallback.
+- Added API key secret regeneration endpoint `POST /projects/:projectId/api-keys/:apiKeyId/regenerate`; generates new secret for the same key in place.
+- Added Drive quota to stats: `GET /projects/:projectId/stats/storage` now includes `driveQuotaLimitBytes`, `driveQuotaUsageBytes`, `driveQuotaUsageInDriveBytes` per connection via `drive.about.get`.
+- Added Dashboard UX improvements: sidebar grouped by workflow order, setup checklist on Projects page, connection revoke confirmation, bucket name validation hint, API key secret banner with copy button, Drive quota display in Statistics page, pool card redesign, logs page redesign with filters in topbar, translated status labels throughout, Brazilian date format.
+- Added `renew` action on API key table: calls `/regenerate` endpoint, replaces key in list, shows new secret.
+
 ## Pending From F5
 
 - Execute real Google OAuth callback and Drive upload/download/delete smoke test with valid credentials.

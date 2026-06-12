@@ -29,10 +29,9 @@ function usagePercent(used: string, total: string): number {
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Armazenamento</p>
-        <h1>Estatísticas de Armazenamento</h1>
+        <h1>Estatísticas</h1>
       </div>
-      <select [value]="selectedProjectId()" (change)="selectProject($event)">
+      <select class="topbar-select" [value]="selectedProjectId()" (change)="selectProject($event)">
         @for (project of projects(); track project.id) {
           <option [value]="project.id">{{ project.name }}</option>
         }
@@ -46,54 +45,74 @@ function usagePercent(used: string, total: string): number {
     @if (isLoading()) {
       <p class="muted">Carregando estatísticas...</p>
     } @else if (stats()) {
-      <section class="panel">
-        <header>
-          <h2>Visão geral</h2>
-        </header>
-        <div class="stats-summary">
-          <div class="stat-card">
-            <span class="stat-label">Armazenamento total usado</span>
-            <span class="stat-value">{{ formatBytes(stats()!.totalSizeBytes) }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Total de arquivos</span>
-            <span class="stat-value">{{ stats()!.totalObjectCount | number }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Drives conectados</span>
-            <span class="stat-value">{{ stats()!.byConnection.length }}</span>
-          </div>
+      <div class="stats-kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-label">Armazenamento usado</span>
+          <strong class="kpi-value">{{ formatBytes(stats()!.totalSizeBytes) }}</strong>
         </div>
-      </section>
+        <div class="kpi-card">
+          <span class="kpi-label">Total de arquivos</span>
+          <strong class="kpi-value">{{ stats()!.totalObjectCount | number }}</strong>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Drives conectados</span>
+          <strong class="kpi-value">{{ stats()!.byConnection.length }}</strong>
+        </div>
+      </div>
 
       <section class="panel">
         <header>
           <h2>Por conexão</h2>
         </header>
         @if (stats()!.byConnection.length === 0) {
-          <p class="empty-state">Nenhum uso de armazenamento ainda.</p>
+          <p class="empty-state">Nenhum uso ainda.</p>
         } @else {
-          @for (conn of stats()!.byConnection; track conn.connectionId) {
-            <div class="connection-stat-card">
-              <div class="connection-stat-header">
-                <strong>{{ conn.displayName ?? conn.provider }}</strong>
-                @if (conn.providerAccountEmail) {
-                  <span class="muted">{{ conn.providerAccountEmail }}</span>
+          <div class="conn-stat-list">
+            @for (conn of stats()!.byConnection; track conn.connectionId) {
+              <div class="conn-stat-row">
+                <div class="conn-stat-identity">
+                  <strong>{{ conn.displayName ?? 'Google Drive' }}</strong>
+                  @if (conn.providerAccountEmail) {
+                    <span class="muted">{{ conn.providerAccountEmail }}</span>
+                  }
+                  <span [class]="'status-label ' + conn.status.toLowerCase()">
+                    {{ conn.status === 'CONNECTED' ? 'Conectado' : conn.status === 'REVOKED' ? 'Revogado' : 'Erro' }}
+                  </span>
+                </div>
+
+                <div class="conn-stat-numbers">
+                  <div class="conn-stat-metric">
+                    <span class="conn-stat-metric-label">Armazenado via SID3</span>
+                    <span class="conn-stat-size">{{ formatBytes(conn.sizeBytes) }}</span>
+                    <span class="muted">{{ conn.objectCount | number }} arquivos</span>
+                  </div>
+                  @if (conn.driveQuotaUsageBytes !== null) {
+                    <div class="conn-stat-metric">
+                      <span class="conn-stat-metric-label">Uso total do Drive</span>
+                      <span class="conn-stat-size">{{ formatBytes(conn.driveQuotaUsageBytes) }}</span>
+                      @if (conn.driveQuotaLimitBytes) {
+                        <span class="muted">de {{ formatBytes(conn.driveQuotaLimitBytes) }}</span>
+                      } @else {
+                        <span class="muted">ilimitado</span>
+                      }
+                    </div>
+                  }
+                </div>
+
+                @if (conn.driveQuotaUsageBytes !== null && conn.driveQuotaLimitBytes) {
+                  <div class="conn-stat-bar-group">
+                    <div class="conn-stat-bar-label">
+                      <span>Cota do Google Drive</span>
+                      <span>{{ usagePercent(conn.driveQuotaUsageBytes, conn.driveQuotaLimitBytes) }}%</span>
+                    </div>
+                    <div class="conn-stat-bar">
+                      <div class="conn-stat-bar-fill" [style.width.%]="usagePercent(conn.driveQuotaUsageBytes, conn.driveQuotaLimitBytes)"></div>
+                    </div>
+                  </div>
                 }
-                <span class="badge">{{ conn.status }}</span>
               </div>
-              <div class="connection-stat-numbers">
-                <span>{{ formatBytes(conn.sizeBytes) }}</span>
-                <span class="muted">{{ conn.objectCount | number }} arquivos</span>
-              </div>
-              <div class="usage-bar-track">
-                <div
-                  class="usage-bar-fill"
-                  [style.width.%]="usagePercent(conn.sizeBytes, stats()!.totalSizeBytes)"
-                ></div>
-              </div>
-            </div>
-          }
+            }
+          </div>
         }
       </section>
 
@@ -104,7 +123,7 @@ function usagePercent(used: string, total: string): number {
         @if (stats()!.byBucket.length === 0) {
           <p class="empty-state">Nenhum bucket tem dados ainda.</p>
         } @else {
-          <div class="table" role="table" aria-label="Armazenamento por bucket">
+          <div class="table stats-bucket-table" role="table" aria-label="Armazenamento por bucket">
             <div role="row" class="head">
               <span role="columnheader">Bucket</span>
               <span role="columnheader">Tamanho</span>

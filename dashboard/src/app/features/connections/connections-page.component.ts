@@ -11,12 +11,8 @@ import { ConnectionsService } from './connections.service';
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Provedores</p>
         <h1>Conexões</h1>
       </div>
-      <button type="button" [disabled]="isConnecting()" (click)="connectGoogle()">
-        {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
-      </button>
     </header>
 
     @if (errorMessage()) {
@@ -24,22 +20,29 @@ import { ConnectionsService } from './connections.service';
     }
 
     <section class="panel">
-      <header>
-        <h2>Provedores conectados</h2>
-        <p>Os tokens de acesso são criptografados pela API e nunca exibidos no dashboard.</p>
+      <header class="panel-header-row">
+        <h2>Contas Google Drive conectadas</h2>
+        <button type="button" [disabled]="isConnecting()" (click)="connectGoogle()">
+          {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
+        </button>
       </header>
 
       @if (isLoading()) {
         <p class="muted">Carregando conexões...</p>
       } @else if (connections().length === 0) {
-        <p class="empty-state">Nenhum provedor conectado.</p>
+        <div class="empty-cta">
+          <p class="muted">Nenhuma conta conectada ainda.</p>
+          <button type="button" [disabled]="isConnecting()" (click)="connectGoogle()">
+            {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
+          </button>
+        </div>
       } @else {
         <div class="table connection-table" role="table" aria-label="Conexões de provedor">
           <div role="row" class="head">
             <span role="columnheader">Nome</span>
+            <span role="columnheader">Conta</span>
             <span role="columnheader">Provedor</span>
             <span role="columnheader">Status</span>
-            <span role="columnheader">Conta</span>
             <span role="columnheader">Criado em</span>
             <span role="columnheader">Ação</span>
           </div>
@@ -62,13 +65,17 @@ import { ConnectionsService } from './connections.service';
                   </span>
                 }
               </span>
-              <span role="cell">{{ connection.provider }}</span>
-              <span role="cell"><span class="badge">{{ connection.status }}</span></span>
               <span role="cell">{{ connection.providerAccountEmail ?? '—' }}</span>
-              <span role="cell">{{ connection.createdAt | date: 'short' }}</span>
+              <span role="cell">{{ connection.provider === 'GOOGLE_DRIVE' ? 'Google Drive' : connection.provider }}</span>
+              <span role="cell">
+                <span [class]="'status-label ' + connection.status.toLowerCase()">
+                  {{ connection.status === 'CONNECTED' ? 'Conectado' : connection.status === 'REVOKED' ? 'Revogado' : 'Erro' }}
+                </span>
+              </span>
+              <span role="cell">{{ connection.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
               <span role="cell">
                 <button
-                  class="secondary compact-button"
+                  class="danger compact-button"
                   type="button"
                   [disabled]="connection.status === 'REVOKED'"
                   (click)="revoke(connection)"
@@ -140,6 +147,10 @@ export class ConnectionsPageComponent {
   }
 
   revoke(connection: Connection): void {
+    const name = connection.displayName ?? connection.provider;
+    if (!window.confirm(`Revogar a conexão com ${name}? Buckets que dependem desta conta deixarão de funcionar.`)) {
+      return;
+    }
     this.errorMessage.set(null);
     this.connectionsService.revokeConnection(connection.id).subscribe({
       next: (updated) => {

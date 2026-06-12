@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { OperationStatus, OperationType, Provider, StorageObjectStatus } from '@prisma/client';
+import { BadGatewayException, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { OperationStatus, OperationType, Prisma, Provider, StorageObjectStatus } from '@prisma/client';
 import { Readable } from 'stream';
 import { ApiKeyAuthContext } from '../../common/auth/api-key-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,9 +15,12 @@ describe(ObjectsService.name, () => {
     projectId: 'project-id'
   };
   const bucketId = 'bucket-id';
+  const integrationId = 'integration-id';
   const bucket = {
     id: bucketId,
     projectId: apiKey.projectId,
+    name: 'fotos',
+    providerIntegrationId: integrationId,
     storagePoolId: null,
     providerRootRef: null,
     providerIntegration: {
@@ -30,17 +33,26 @@ describe(ObjectsService.name, () => {
   };
 
   let prisma: {
-    bucket: { findFirst: jest.Mock };
+    bucket: { findFirst: jest.Mock; update: jest.Mock };
+    bucketFolderRef: { findUnique: jest.Mock; findUniqueOrThrow: jest.Mock; create: jest.Mock };
     project: { findUnique: jest.Mock };
     storageObject: { create: jest.Mock; findFirst: jest.Mock; findMany: jest.Mock; update: jest.Mock };
     operationLog: { create: jest.Mock };
   };
-  let provider: { uploadObject: jest.Mock; downloadObject: jest.Mock; deleteObject: jest.Mock };
+  let provider: { uploadObject: jest.Mock; downloadObject: jest.Mock; deleteObject: jest.Mock; findOrCreateFolder: jest.Mock };
   let service: ObjectsService;
 
   beforeEach(() => {
     prisma = {
-      bucket: { findFirst: jest.fn().mockResolvedValue(bucket) },
+      bucket: {
+        findFirst: jest.fn().mockResolvedValue(bucket),
+        update: jest.fn().mockResolvedValue({ id: bucketId })
+      },
+      bucketFolderRef: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findUniqueOrThrow: jest.fn(),
+        create: jest.fn().mockResolvedValue({ id: 'ref-id' })
+      },
       project: { findUnique: jest.fn().mockResolvedValue({ ownerUserId: 'owner-id' }) },
       storageObject: {
         create: jest.fn(),
@@ -53,7 +65,8 @@ describe(ObjectsService.name, () => {
     provider = {
       uploadObject: jest.fn(),
       downloadObject: jest.fn(),
-      deleteObject: jest.fn()
+      deleteObject: jest.fn(),
+      findOrCreateFolder: jest.fn().mockResolvedValue('drive-folder-id')
     };
     const registry = {
       getProvider: jest.fn().mockReturnValue(provider)
@@ -296,6 +309,203 @@ describe(ObjectsService.name, () => {
         } as Express.Multer.File
       )
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('bucket folder resolution on upload', () => {
+    const uploadFile = {
+      originalname: 'user.png',
+      mimetype: 'image/png',
+      size: 4,
+      buffer: Buffer.from('file')
+    } as Express.Multer.File;
+
+    beforeEach(() => {
+      prisma.storageObject.create.mockResolvedValue({ id: 'object-id' });
+      provider.uploadObject.mockResolvedValue({
+        providerFileId: 'google-file-id',
+        fileName: 'user.png',
+        contentType: 'image/png',
+        sizeBytes: 4
+      });
+      prisma.storageObject.update.mockResolvedValue(persistedObject({ id: 'object-id', key: 'photo.png' }));
+    });
+
+    it('finds or creates folder for direct bucket without cached ref and persists the folder id', async () => {
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object));
+      expect(prisma.bucket.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: bucketId, providerRootRef: null },
+        data: { providerRootRef: 'drive-folder-id' }
+      }));
+      expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
+        parentFolderId: 'drive-folder-id'
+      }));
+    });
+
+    it('reuses cached providerRootRef for direct bucket without calling the Drive API', async () => {
+      prisma.bucket.findFirst.mockResolvedValue({ ...bucket, providerRootRef: 'cached-folder-id' });
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.findOrCreateFolder).not.toHaveBeenCalled();
+      expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
+        parentFolderId: 'cached-folder-id'
+      }));
+    });
+
+    it('creates BucketFolderRef for pool bucket without cached ref', async () => {
+      const poolBucket = {
+        ...bucket,
+        providerIntegrationId: null,
+        providerIntegration: null,
+        storagePoolId: 'pool-id',
+        storagePool: {
+          strategy: 'ROUND_ROBIN',
+          members: [{
+            id: 'member-id',
+            providerIntegrationId: 'pool-integration-id',
+            weight: 1,
+            roundRobinIndex: 0,
+            providerIntegration: {
+              provider: Provider.GOOGLE_DRIVE,
+              encryptedAccessToken: 'encrypted-access',
+              encryptedRefreshToken: null,
+              tokenExpiresAt: null
+            }
+          }]
+        }
+      };
+      prisma.bucket.findFirst.mockResolvedValue(poolBucket);
+      const selectMember = jest.fn().mockResolvedValue({
+        memberId: 'member-id',
+        providerIntegrationId: 'pool-integration-id',
+        encryptedAccessToken: 'encrypted-access',
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
+      });
+      const registry = { getProvider: jest.fn().mockReturnValue(provider) } as unknown as StorageProviderRegistry;
+      const poolRoutingFactory = { getStrategy: jest.fn().mockReturnValue({ selectMember }) } as unknown as PoolRoutingFactory;
+      service = new ObjectsService(prisma as unknown as PrismaService, registry, poolRoutingFactory);
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object));
+      expect(prisma.bucketFolderRef.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          bucketId,
+          providerIntegrationId: 'pool-integration-id',
+          folderId: 'drive-folder-id'
+        })
+      }));
+      expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
+        parentFolderId: 'drive-folder-id'
+      }));
+    });
+
+    it('reuses BucketFolderRef cache for pool bucket without calling the Drive API', async () => {
+      const poolBucket = {
+        ...bucket,
+        providerIntegrationId: null,
+        providerIntegration: null,
+        storagePoolId: 'pool-id',
+        storagePool: {
+          strategy: 'ROUND_ROBIN',
+          members: [{
+            id: 'member-id',
+            providerIntegrationId: 'pool-integration-id',
+            weight: 1,
+            roundRobinIndex: 0,
+            providerIntegration: {
+              provider: Provider.GOOGLE_DRIVE,
+              encryptedAccessToken: 'encrypted-access',
+              encryptedRefreshToken: null,
+              tokenExpiresAt: null
+            }
+          }]
+        }
+      };
+      prisma.bucket.findFirst.mockResolvedValue(poolBucket);
+      prisma.bucketFolderRef.findUnique.mockResolvedValue({ folderId: 'cached-pool-folder-id' });
+      const selectMember = jest.fn().mockResolvedValue({
+        memberId: 'member-id',
+        providerIntegrationId: 'pool-integration-id',
+        encryptedAccessToken: 'encrypted-access',
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
+      });
+      const registry = { getProvider: jest.fn().mockReturnValue(provider) } as unknown as StorageProviderRegistry;
+      const poolRoutingFactory = { getStrategy: jest.fn().mockReturnValue({ selectMember }) } as unknown as PoolRoutingFactory;
+      service = new ObjectsService(prisma as unknown as PrismaService, registry, poolRoutingFactory);
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.findOrCreateFolder).not.toHaveBeenCalled();
+      expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
+        parentFolderId: 'cached-pool-folder-id'
+      }));
+    });
+
+    it('handles race condition on BucketFolderRef create by falling back to findUniqueOrThrow', async () => {
+      const poolBucket = {
+        ...bucket,
+        providerIntegrationId: null,
+        providerIntegration: null,
+        storagePoolId: 'pool-id',
+        storagePool: {
+          strategy: 'ROUND_ROBIN',
+          members: [{
+            id: 'member-id',
+            providerIntegrationId: 'pool-integration-id',
+            weight: 1,
+            roundRobinIndex: 0,
+            providerIntegration: {
+              provider: Provider.GOOGLE_DRIVE,
+              encryptedAccessToken: 'encrypted-access',
+              encryptedRefreshToken: null,
+              tokenExpiresAt: null
+            }
+          }]
+        }
+      };
+      prisma.bucket.findFirst.mockResolvedValue(poolBucket);
+
+      const p2002Error = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['bucket_id', 'provider_integration_id'] }
+      });
+      prisma.bucketFolderRef.create.mockRejectedValue(p2002Error);
+      prisma.bucketFolderRef.findUniqueOrThrow.mockResolvedValue({ folderId: 'race-folder-id' });
+
+      const selectMember = jest.fn().mockResolvedValue({
+        memberId: 'member-id',
+        providerIntegrationId: 'pool-integration-id',
+        encryptedAccessToken: 'encrypted-access',
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
+      });
+      const registry = { getProvider: jest.fn().mockReturnValue(provider) } as unknown as StorageProviderRegistry;
+      const poolRoutingFactory = { getStrategy: jest.fn().mockReturnValue({ selectMember }) } as unknown as PoolRoutingFactory;
+      service = new ObjectsService(prisma as unknown as PrismaService, registry, poolRoutingFactory);
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(prisma.bucketFolderRef.findUniqueOrThrow).toHaveBeenCalled();
+      expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
+        parentFolderId: 'race-folder-id'
+      }));
+    });
+
+    it('does not create StorageObject when Drive folder resolution fails', async () => {
+      provider.findOrCreateFolder.mockRejectedValue(new BadGatewayException('Drive error'));
+
+      await expect(
+        service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile)
+      ).rejects.toBeInstanceOf(BadGatewayException);
+
+      expect(prisma.storageObject.create).not.toHaveBeenCalled();
+    });
   });
 });
 

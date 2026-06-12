@@ -6,6 +6,7 @@ import { ApiKeyAuthContext } from '../../common/auth/api-key-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { PoolRoutingFactory } from '../storage-pools/pool-routing/pool-routing.factory';
 import { PoolMemberCredentials } from '../storage-pools/pool-routing/pool-routing.strategy';
+import { GoogleDriveStorageProvider } from '../storage-providers/google-drive-storage.provider';
 import { StorageProviderRegistry } from '../storage-providers/storage-provider.registry';
 import { StorageProviderIntegrationCredentials } from '../storage-providers/dto/storage-provider.types';
 import { ObjectListResponseDto } from './dto/object-list-response.dto';
@@ -48,6 +49,8 @@ type PoolMemberWithCredentials = {
 type BucketWithIntegration = {
   id: string;
   projectId: string;
+  name: string;
+  providerIntegrationId: string | null;
   storagePoolId: string | null;
   providerRootRef: string | null;
   providerIntegration: BucketIntegrationCredentials | null;
@@ -107,6 +110,7 @@ export class ObjectsService {
     const resolvedCredentials = await this.resolveIntegrationForUpload(bucket);
 
     await this.ensureObjectKeyAvailable(apiKey, bucketId, request.key, resolvedCredentials.provider);
+    const parentFolderId = await this.resolveBucketFolderOnDrive(bucket, resolvedCredentials.integrationId, resolvedCredentials);
     const checksumSha256 = createHash('sha256').update(file.buffer).digest('hex');
     const storageObject = await this.createPendingObject(
       apiKey,
@@ -126,7 +130,7 @@ export class ObjectsService {
         fileName: file.originalname,
         contentType: file.mimetype,
         content: file.buffer,
-        parentFolderId: bucket.providerRootRef
+        parentFolderId
       });
 
       const updated = await this.prisma.storageObject.update({
@@ -212,6 +216,8 @@ export class ObjectsService {
       select: {
         id: true,
         projectId: true,
+        name: true,
+        providerIntegrationId: true,
         storagePoolId: true,
         providerRootRef: true,
         providerIntegration: {
@@ -540,6 +546,73 @@ export class ObjectsService {
     });
   }
 
+  private async resolveBucketFolderOnDrive(
+    bucket: BucketWithIntegration,
+    resolvedIntegrationId: string,
+    credentials: StorageProviderIntegrationCredentials
+  ): Promise<string | undefined> {
+    const driveProvider = this.storageProviderRegistry.getProvider(credentials.provider) as GoogleDriveStorageProvider;
+
+    if (bucket.providerIntegrationId) {
+      if (bucket.providerRootRef) {
+        return bucket.providerRootRef;
+      }
+
+      const folderId = await driveProvider.findOrCreateFolder(bucket.name, credentials);
+
+      await this.prisma.bucket.update({
+        where: { id: bucket.id, providerRootRef: null },
+        data: { providerRootRef: folderId },
+        select: { id: true }
+      }).catch(() => undefined);
+
+      return folderId;
+    }
+
+    const existing = await this.prisma.bucketFolderRef.findUnique({
+      where: {
+        bucketId_providerIntegrationId: {
+          bucketId: bucket.id,
+          providerIntegrationId: resolvedIntegrationId
+        }
+      },
+      select: { folderId: true }
+    });
+
+    if (existing) {
+      return existing.folderId;
+    }
+
+    const folderId = await driveProvider.findOrCreateFolder(bucket.name, credentials);
+
+    try {
+      await this.prisma.bucketFolderRef.create({
+        data: {
+          bucketId: bucket.id,
+          providerIntegrationId: resolvedIntegrationId,
+          folderId
+        },
+        select: { id: true }
+      });
+    } catch (error) {
+      if (this.isUniqueFolderRefError(error)) {
+        const winner = await this.prisma.bucketFolderRef.findUniqueOrThrow({
+          where: {
+            bucketId_providerIntegrationId: {
+              bucketId: bucket.id,
+              providerIntegrationId: resolvedIntegrationId
+            }
+          },
+          select: { folderId: true }
+        });
+        return winner.folderId;
+      }
+      throw error;
+    }
+
+    return folderId;
+  }
+
   private isUniqueObjectKeyError(error: unknown): boolean {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -547,6 +620,16 @@ export class ObjectsService {
       Array.isArray(error.meta?.target) &&
       error.meta.target.includes('bucket_id') &&
       error.meta.target.includes('key')
+    );
+  }
+
+  private isUniqueFolderRefError(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002' &&
+      Array.isArray(error.meta?.target) &&
+      error.meta.target.includes('bucket_id') &&
+      error.meta.target.includes('provider_integration_id')
     );
   }
 }

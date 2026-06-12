@@ -18,7 +18,6 @@ import { BucketsService } from './buckets.service';
   template: `
     <header class="topbar">
       <div>
-        <p class="eyebrow">Armazenamento</p>
         <h1>Buckets</h1>
       </div>
     </header>
@@ -27,7 +26,7 @@ import { BucketsService } from './buckets.service';
       <form class="panel" [formGroup]="form" (ngSubmit)="createBucket()">
         <header>
           <h2>Criar bucket</h2>
-          <p>Buckets mapeiam namespaces de objetos SID3 para uma conexão ou pool de armazenamento.</p>
+          <p class="muted">Um bucket é onde seus arquivos serão armazenados. Associe-o a uma conexão Google Drive.</p>
         </header>
 
         <label>
@@ -40,10 +39,10 @@ import { BucketsService } from './buckets.service';
         </label>
 
         <label>
-          Tipo de armazenamento
+          Destino de armazenamento
           <select formControlName="storageType">
-            <option value="connection">Conexão direta</option>
-            <option value="pool">Pool de armazenamento</option>
+            <option value="connection">Google Drive (conexão direta)</option>
+            <option value="pool">Pool de drives (avançado)</option>
           </select>
         </label>
 
@@ -52,7 +51,7 @@ import { BucketsService } from './buckets.service';
             Conexão
             <select formControlName="providerIntegrationId">
               @for (conn of connectedIntegrations(); track conn.id) {
-                <option [value]="conn.id">{{ conn.displayName ?? conn.provider }} ({{ conn.status }})</option>
+                <option [value]="conn.id">{{ conn.displayName ?? conn.provider }}</option>
               }
             </select>
           </label>
@@ -61,7 +60,7 @@ import { BucketsService } from './buckets.service';
             Pool de armazenamento
             <select formControlName="storagePoolId">
               @for (pool of storagePools(); track pool.id) {
-                <option [value]="pool.id">{{ pool.name }} ({{ pool.strategy }}, {{ pool.members.length }} drives)</option>
+                <option [value]="pool.id">{{ pool.name }} ({{ pool.members.length }} drives)</option>
               }
             </select>
           </label>
@@ -69,8 +68,11 @@ import { BucketsService } from './buckets.service';
 
         <label>
           Nome do bucket
-          <input type="text" formControlName="name" placeholder="avatares" />
+          <input type="text" formControlName="name" placeholder="fotos" />
         </label>
+        <p class="field-hint" [class.field-hint--error]="form.controls.name.touched && form.controls.name.invalid">
+          Apenas letras minúsculas, números e hífens. Mínimo 3, máximo 63 caracteres.
+        </p>
 
         @if (errorMessage()) {
           <p class="form-error">{{ errorMessage() }}</p>
@@ -87,13 +89,12 @@ import { BucketsService } from './buckets.service';
       <section class="panel">
         <header>
           <h2>{{ selectedProject()?.name ?? 'Buckets do projeto' }}</h2>
-          <p>Somente buckets do projeto selecionado são exibidos.</p>
         </header>
 
         @if (isLoading()) {
           <p class="muted">Carregando buckets...</p>
         } @else if (buckets().length === 0) {
-          <p class="empty-state">Nenhum bucket para este projeto.</p>
+          <p class="empty-state">Nenhum bucket ainda. Crie o primeiro ao lado.</p>
         } @else {
           <div class="table bucket-table" role="table" aria-label="Buckets">
             <div role="row" class="head">
@@ -104,14 +105,8 @@ import { BucketsService } from './buckets.service';
             @for (bucket of buckets(); track bucket.id) {
               <div role="row">
                 <span role="cell">{{ bucket.name }}</span>
-                <span role="cell">
-                  @if (bucket.storagePoolId) {
-                    <span class="badge">Pool: {{ bucket.storagePoolId }}</span>
-                  } @else {
-                    {{ bucket.providerIntegrationId }}
-                  }
-                </span>
-                <span role="cell">{{ bucket.createdAt | date: 'short' }}</span>
+                <span role="cell">{{ storageLabel(bucket) }}</span>
+                <span role="cell">{{ bucket.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
               </div>
             }
           </div>
@@ -184,6 +179,18 @@ export class BucketsPageComponent {
         },
         error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
       });
+  }
+
+  protected storageLabel(bucket: Bucket): string {
+    if (bucket.storagePoolId) {
+      const pool = this.storagePools().find((p) => p.id === bucket.storagePoolId);
+      return pool ? `Pool: ${pool.name}` : 'Pool';
+    }
+    if (bucket.providerIntegrationId) {
+      const conn = this.connections().find((c) => c.id === bucket.providerIntegrationId);
+      return conn ? (conn.displayName ?? 'Google Drive') : 'Google Drive';
+    }
+    return '—';
   }
 
   private loadInitialData(): void {

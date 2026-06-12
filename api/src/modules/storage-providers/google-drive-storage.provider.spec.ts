@@ -8,6 +8,7 @@ import { GoogleDriveStorageProvider } from './google-drive-storage.provider';
 const driveCreate = jest.fn();
 const driveGet = jest.fn();
 const driveDelete = jest.fn();
+const driveList = jest.fn();
 const setCredentials = jest.fn();
 
 jest.mock('googleapis', () => ({
@@ -16,7 +17,8 @@ jest.mock('googleapis', () => ({
       files: {
         create: driveCreate,
         get: driveGet,
-        delete: driveDelete
+        delete: driveDelete,
+        list: driveList
       }
     }))
   }
@@ -239,5 +241,129 @@ describe(GoogleDriveStorageProvider.name, () => {
         content: Buffer.from('file')
       })
     ).rejects.toBeInstanceOf(BadGatewayException);
+  });
+
+  describe('findFolderByName', () => {
+    it('returns the folder id when a matching folder exists in Drive root', async () => {
+      driveList.mockResolvedValue({ data: { files: [{ id: 'folder-id' }] } });
+
+      const result = await provider.findFolderByName('fotos', integration);
+
+      expect(driveList).toHaveBeenCalledWith(expect.objectContaining({
+        q: expect.stringContaining("name = 'fotos'"),
+        pageSize: 1
+      }));
+      expect(driveList).toHaveBeenCalledWith(expect.objectContaining({
+        q: expect.stringContaining("'root' in parents")
+      }));
+      expect(result).toBe('folder-id');
+    });
+
+    it('returns null when no matching folder exists', async () => {
+      driveList.mockResolvedValue({ data: { files: [] } });
+
+      const result = await provider.findFolderByName('fotos', integration);
+
+      expect(result).toBeNull();
+    });
+
+    it('uses parentFolderId in the query when provided', async () => {
+      driveList.mockResolvedValue({ data: { files: [] } });
+
+      await provider.findFolderByName('fotos', integration, 'parent-folder-id');
+
+      expect(driveList).toHaveBeenCalledWith(expect.objectContaining({
+        q: expect.stringContaining("'parent-folder-id' in parents")
+      }));
+    });
+
+    it('excludes trashed folders from results', async () => {
+      driveList.mockResolvedValue({ data: { files: [] } });
+
+      await provider.findFolderByName('fotos', integration);
+
+      expect(driveList).toHaveBeenCalledWith(expect.objectContaining({
+        q: expect.stringContaining('trashed = false')
+      }));
+    });
+
+    it('maps Drive errors to BadGatewayException', async () => {
+      driveList.mockRejectedValue(new Error('quota exceeded'));
+
+      await expect(provider.findFolderByName('fotos', integration)).rejects.toBeInstanceOf(BadGatewayException);
+    });
+  });
+
+  describe('createFolder', () => {
+    it('creates a folder and returns its id', async () => {
+      driveCreate.mockResolvedValue({ data: { id: 'new-folder-id' } });
+
+      const result = await provider.createFolder('fotos', integration);
+
+      expect(driveCreate).toHaveBeenCalledWith(expect.objectContaining({
+        requestBody: expect.objectContaining({
+          name: 'fotos',
+          mimeType: 'application/vnd.google-apps.folder'
+        }),
+        fields: 'id'
+      }));
+      expect(result).toBe('new-folder-id');
+    });
+
+    it('creates a folder inside a parent when parentFolderId is provided', async () => {
+      driveCreate.mockResolvedValue({ data: { id: 'new-folder-id' } });
+
+      await provider.createFolder('fotos', integration, 'parent-folder-id');
+
+      expect(driveCreate).toHaveBeenCalledWith(expect.objectContaining({
+        requestBody: expect.objectContaining({
+          parents: ['parent-folder-id']
+        })
+      }));
+    });
+
+    it('throws BadGatewayException when Drive does not return a folder id', async () => {
+      driveCreate.mockResolvedValue({ data: {} });
+
+      await expect(provider.createFolder('fotos', integration)).rejects.toBeInstanceOf(BadGatewayException);
+    });
+
+    it('maps Drive errors to BadGatewayException', async () => {
+      driveCreate.mockRejectedValue(new Error('network error'));
+
+      await expect(provider.createFolder('fotos', integration)).rejects.toBeInstanceOf(BadGatewayException);
+    });
+  });
+
+  describe('findOrCreateFolder', () => {
+    it('returns existing folder id without calling create when folder already exists', async () => {
+      driveList.mockResolvedValue({ data: { files: [{ id: 'existing-folder-id' }] } });
+
+      const result = await provider.findOrCreateFolder('fotos', integration);
+
+      expect(driveCreate).not.toHaveBeenCalled();
+      expect(result).toBe('existing-folder-id');
+    });
+
+    it('creates folder when not found and returns new id', async () => {
+      driveList.mockResolvedValue({ data: { files: [] } });
+      driveCreate.mockResolvedValue({ data: { id: 'created-folder-id' } });
+
+      const result = await provider.findOrCreateFolder('fotos', integration);
+
+      expect(driveCreate).toHaveBeenCalledWith(expect.objectContaining({
+        requestBody: expect.objectContaining({
+          mimeType: 'application/vnd.google-apps.folder'
+        })
+      }));
+      expect(result).toBe('created-folder-id');
+    });
+
+    it('propagates BadGatewayException from Drive search failure', async () => {
+      driveList.mockRejectedValue(new Error('search failed'));
+
+      await expect(provider.findOrCreateFolder('fotos', integration)).rejects.toBeInstanceOf(BadGatewayException);
+      expect(driveCreate).not.toHaveBeenCalled();
+    });
   });
 });

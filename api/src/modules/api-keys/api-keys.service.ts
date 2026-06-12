@@ -58,6 +58,32 @@ export class ApiKeysService {
     };
   }
 
+  async regenerateApiKey(
+    ownerUserId: string,
+    projectId: string,
+    apiKeyId: string
+  ): Promise<ApiKeyCreatedResponseDto> {
+    await this.ensureProjectOwner(ownerUserId, projectId);
+
+    const apiKey = await this.prisma.apiKey.findFirst({
+      where: { id: apiKeyId, projectId },
+      select: { id: true }
+    });
+
+    if (!apiKey) {
+      throw new NotFoundException('Chave de API não encontrada');
+    }
+
+    const generated = this.apiKeySecretService.generate();
+    const updated = await this.prisma.apiKey.update({
+      where: { id: apiKeyId },
+      data: { prefix: generated.prefix, secretHash: generated.secretHash },
+      select: this.apiKeySelect()
+    });
+
+    return { apiKey: this.toApiKeyResponse(updated), secret: generated.secret };
+  }
+
   async revokeApiKey(ownerUserId: string, projectId: string, apiKeyId: string): Promise<void> {
     await this.ensureProjectOwner(ownerUserId, projectId);
 
