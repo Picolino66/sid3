@@ -69,4 +69,15 @@ export class ConnectionsController {
   ): Promise<ConnectionResponseDto> {
     return this.connectionsService.revokeConnection(user.id, connectionId);
   }
+
+  @Post(':connectionId/reauthorize')
+  @ApiOkResponse({ type: OAuthAuthorizeResponseDto })
+  @ApiNotFoundResponse({ description: 'Connection not found' })
+  @ApiUnauthorizedResponse({ description: 'Invalid or missing bearer token' })
+  reauthorizeGoogle(
+    @CurrentUserContext() user: CurrentUser,
+    @Param('connectionId') connectionId: string
+  ): Promise<OAuthAuthorizeResponseDto> {
+    return this.connectionsService.reauthorizeGoogle(user.id, connectionId);
+  }
 }

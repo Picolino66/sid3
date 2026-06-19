@@ -28,4 +28,8 @@ export class ConnectionsService {
   revokeConnection(connectionId: string): Observable<Connection> {
     return this.http.post<Connection>(`${this.apiBaseUrl}/connections/${connectionId}/revoke`, {});
   }
+
+  reauthorizeConnection(connectionId: string): Observable<OAuthAuthorizeResponse> {
+    return this.http.post<OAuthAuthorizeResponse>(`${this.apiBaseUrl}/connections/${connectionId}/reauthorize`, {});
+  }
 }

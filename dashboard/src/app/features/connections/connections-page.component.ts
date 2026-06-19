@@ -73,15 +73,24 @@ import { ConnectionsService } from './connections.service';
                 </span>
               </span>
               <span role="cell">{{ connection.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
-              <span role="cell">
+              <span role="cell" class="action-cell">
                 <button
-                  class="danger compact-button"
+                  class="compact-button"
                   type="button"
-                  [disabled]="connection.status === 'REVOKED'"
-                  (click)="revoke(connection)"
+                  [disabled]="reauthorizingId() === connection.id"
+                  (click)="reauthorize(connection)"
                 >
-                  Revogar
+                  {{ reauthorizingId() === connection.id ? 'Redirecionando...' : 'Reconectar' }}
                 </button>
+                @if (connection.status === 'CONNECTED') {
+                  <button
+                    class="danger compact-button"
+                    type="button"
+                    (click)="revoke(connection)"
+                  >
+                    Revogar
+                  </button>
+                }
               </span>
             </div>
           }
@@ -97,6 +106,7 @@ export class ConnectionsPageComponent {
   protected readonly connections = signal<Connection[]>([]);
   protected readonly isLoading = signal(true);
   protected readonly isConnecting = signal(false);
+  protected readonly reauthorizingId = signal<string | null>(null);
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly editingId = signal<string | null>(null);
   protected readonly editingName = signal('');
@@ -144,6 +154,20 @@ export class ConnectionsPageComponent {
       },
       error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
     });
+  }
+
+  reauthorize(connection: Connection): void {
+    this.errorMessage.set(null);
+    this.reauthorizingId.set(connection.id);
+    this.connectionsService
+      .reauthorizeConnection(connection.id)
+      .pipe(finalize(() => this.reauthorizingId.set(null)))
+      .subscribe({
+        next: (response) => {
+          window.location.assign(response.authorizationUrl);
+        },
+        error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+      });
   }
 
   revoke(connection: Connection): void {

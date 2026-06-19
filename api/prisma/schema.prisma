@@ -236,14 +236,15 @@ model OperationLog {
 }
 
 model OAuthState {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stateHash   String    @map("state_hash")
-  redirectUri String    @map("redirect_uri")
-  expiresAt   DateTime  @map("expires_at")
-  consumedAt  DateTime? @map("consumed_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stateHash    String    @map("state_hash")
+  redirectUri  String    @map("redirect_uri")
+  connectionId String?   @map("connection_id") @db.Uuid
+  expiresAt    DateTime  @map("expires_at")
+  consumedAt   DateTime? @map("consumed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   @@index([userId, expiresAt])
   @@map("oauth_states")

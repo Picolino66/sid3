@@ -31,7 +31,33 @@ export class ConnectionsService {
 
   async createGoogleAuthorizationUrl(userId: string): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
     await this.ensureUserExists(userId);
+    return this.generateOAuthState(userId);
+  }
 
+  async reauthorizeGoogle(
+    userId: string,
+    connectionId: string
+  ): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
+    await this.ensureUserExists(userId);
+
+    const connection = await this.prisma.providerIntegration.findFirst({
+      where: { id: connectionId, userId },
+      select: { id: true }
+    });
+
+    if (!connection) {
+      throw new NotFoundException('Conexão não encontrada');
+    }
+
+    this.logger.log(`Reauthorizing connection=${this.maskId(connectionId)} user=${this.maskId(userId)}`);
+
+    return this.generateOAuthState(userId, connectionId);
+  }
+
+  private async generateOAuthState(
+    userId: string,
+    connectionId?: string
+  ): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
     const state = randomBytes(32).toString('base64url');
     const stateExpiresAt = new Date(Date.now() + this.oauthStateTtlMs);
 
@@ -40,11 +66,14 @@ export class ConnectionsService {
         userId,
         stateHash: this.hashState(state),
         redirectUri: 'google',
+        connectionId: connectionId ?? null,
         expiresAt: stateExpiresAt
       }
     });
 
-    this.logger.log(`Created Google OAuth state for user=${this.maskId(userId)} expiresAt=${stateExpiresAt.toISOString()}`);
+    this.logger.log(
+      `Created Google OAuth state for user=${this.maskId(userId)}${connectionId ? ` connectionId=${this.maskId(connectionId)}` : ''} expiresAt=${stateExpiresAt.toISOString()}`
+    );
 
     return {
       authorizationUrl: this.googleOAuthClient.createAuthorizationUrl(state),
@@ -67,7 +96,8 @@ export class ConnectionsService {
         expiresAt: { gt: new Date() }
       },
       select: {
-        id: true
+        id: true,
+        connectionId: true
       }
     });
 
@@ -79,10 +109,20 @@ export class ConnectionsService {
 
     try {
       const tokens = await this.googleOAuthClient.exchangeCode(request.code);
-      const connection = await this.storeGoogleConnection(userId, oauthState.id, tokens);
-      this.logger.log(
-        `Connected Google Drive connection=${this.maskId(connection.id)} user=${this.maskId(userId)} scopes=${connection.scopes.join(',')}`
-      );
+      let connection: PersistedConnection;
+
+      if (oauthState.connectionId) {
+        connection = await this.updateGoogleConnection(userId, oauthState.id, oauthState.connectionId, tokens);
+        this.logger.log(
+          `Reauthorized Google Drive connection=${this.maskId(connection.id)} user=${this.maskId(userId)} scopes=${connection.scopes.join(',')}`
+        );
+      } else {
+        connection = await this.storeGoogleConnection(userId, oauthState.id, tokens);
+        this.logger.log(
+          `Connected Google Drive connection=${this.maskId(connection.id)} user=${this.maskId(userId)} scopes=${connection.scopes.join(',')}`
+        );
+      }
+
       return this.toConnectionResponse(connection);
     } catch (error) {
       this.logger.error(
@@ -207,6 +247,35 @@ export class ConnectionsService {
             ? this.tokenEncryptionService.encrypt(tokens.refreshToken)
             : null,
           tokenExpiresAt: tokens.expiryDate,
+          scopes: tokens.scopes,
+          status: ProviderIntegrationStatus.CONNECTED,
+          revokedAt: null
+        },
+        select: this.connectionSelect()
+      });
+    });
+  }
+
+  private async updateGoogleConnection(
+    userId: string,
+    oauthStateId: string,
+    connectionId: string,
+    tokens: GoogleTokenResult
+  ): Promise<PersistedConnection> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.oAuthState.update({
+        where: { id: oauthStateId },
+        data: { consumedAt: new Date() }
+      });
+
+      return tx.providerIntegration.update({
+        where: { id: connectionId, userId },
+        data: {
+          encryptedAccessToken: this.tokenEncryptionService.encrypt(tokens.accessToken),
+          encryptedRefreshToken: tokens.refreshToken
+            ? this.tokenEncryptionService.encrypt(tokens.refreshToken)
+            : undefined,
+          tokenExpiresAt: tokens.expiryDate ?? undefined,
           scopes: tokens.scopes,
           status: ProviderIntegrationStatus.CONNECTED,
           revokedAt: null

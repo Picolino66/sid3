@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OperationStatus, OperationType, Prisma, Provider, StorageObjectStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { Readable } from 'stream';
@@ -62,6 +62,8 @@ type BucketWithIntegration = {
 
 @Injectable()
 export class ObjectsService {
+  private readonly logger = new Logger(ObjectsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageProviderRegistry: StorageProviderRegistry,
@@ -147,12 +149,25 @@ export class ObjectsService {
       await this.logOperation(apiKey, bucketId, storageObject.id, OperationType.UPLOAD, OperationStatus.SUCCESS);
       return this.toStorageObjectResponse(updated);
     } catch (error) {
+      const errorCode = this.extractErrorCode(error);
+      this.logger.error(
+        `Upload failed for bucket=${bucketId} object=${storageObject.id} errorCode=${errorCode}`,
+        error instanceof Error ? error.stack : String(error)
+      );
       await this.prisma.storageObject.update({
         where: { id: storageObject.id },
         data: { status: StorageObjectStatus.FAILED },
         select: { id: true }
       });
-      await this.logOperation(apiKey, bucketId, storageObject.id, OperationType.UPLOAD, OperationStatus.FAILED);
+      await this.logOperation(
+        apiKey,
+        bucketId,
+        storageObject.id,
+        OperationType.UPLOAD,
+        OperationStatus.FAILED,
+        resolvedCredentials.provider,
+        errorCode
+      );
       throw error;
     }
   }
@@ -631,5 +646,15 @@ export class ObjectsService {
       error.meta.target.includes('bucket_id') &&
       error.meta.target.includes('provider_integration_id')
     );
+  }
+
+  private extractErrorCode(error: unknown): string | undefined {
+    if (!(error instanceof Error)) return undefined;
+    const msg = error.message.toLowerCase();
+    if (msg.includes('invalid_grant')) return 'INVALID_GRANT';
+    if (msg.includes('quota')) return 'QUOTA_EXCEEDED';
+    if (msg.includes('forbidden') || msg.includes('403')) return 'FORBIDDEN';
+    if (msg.includes('not found') || msg.includes('404')) return 'NOT_FOUND';
+    return 'PROVIDER_ERROR';
   }
 }
