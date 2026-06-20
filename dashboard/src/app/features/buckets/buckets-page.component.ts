@@ -74,6 +74,18 @@ import { BucketsService } from './buckets.service';
           Apenas letras minúsculas, números e hífens. Mínimo 3, máximo 63 caracteres.
         </p>
 
+        @if (createdBucketId()) {
+          <div class="secret-banner">
+            <p class="secret-warning">Bucket criado. Copie o ID para usá-lo nas requisições da API.</p>
+            <div class="secret-row">
+              <code class="secret-value">{{ createdBucketId() }}</code>
+              <button type="button" class="secondary compact-button" (click)="copyBucketId()">
+                {{ copied() ? 'Copiado!' : 'Copiar' }}
+              </button>
+            </div>
+          </div>
+        }
+
         @if (errorMessage()) {
           <p class="form-error">{{ errorMessage() }}</p>
         }
@@ -137,6 +149,8 @@ export class BucketsPageComponent {
   protected readonly isLoading = signal(true);
   protected readonly isSubmitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly createdBucketId = signal<string | null>(null);
+  protected readonly copied = signal(false);
   protected readonly form = this.formBuilder.nonNullable.group({
     name: ['', [Validators.required, Validators.pattern(/^[a-z0-9][a-z0-9-]{2,62}$/)]],
     storageType: ['connection'],
@@ -151,8 +165,20 @@ export class BucketsPageComponent {
   selectProject(event: Event): void {
     const projectId = (event.target as HTMLSelectElement).value;
     this.selectedProjectId.set(projectId);
+    this.createdBucketId.set(null);
+    this.copied.set(false);
     this.loadBuckets(projectId);
     this.loadPools(projectId);
+  }
+
+  copyBucketId(): void {
+    const bucketId = this.createdBucketId();
+    if (!bucketId) return;
+
+    void navigator.clipboard.writeText(bucketId).then(() => {
+      this.copied.set(true);
+      setTimeout(() => this.copied.set(false), 2000);
+    });
   }
 
   createBucket(): void {
@@ -168,6 +194,8 @@ export class BucketsPageComponent {
         : { name, providerIntegrationId: providerIntegrationId || undefined };
 
     this.errorMessage.set(null);
+    this.createdBucketId.set(null);
+    this.copied.set(false);
     this.isSubmitting.set(true);
     this.bucketsService
       .createBucket(projectId, request)
@@ -175,6 +203,7 @@ export class BucketsPageComponent {
       .subscribe({
         next: (bucket) => {
           this.buckets.update((buckets) => [...buckets, bucket]);
+          this.createdBucketId.set(bucket.id);
           this.form.controls.name.reset();
         },
         error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
