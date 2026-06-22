@@ -10,6 +10,7 @@ import {
   Query,
   Res,
   UploadedFile,
+  UseFilters,
   UseGuards,
   UseInterceptors
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import {
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiResponse,
   ApiSecurity,
   ApiTags,
   ApiUnauthorizedResponse
@@ -31,6 +33,8 @@ import { ObjectListResponseDto } from './dto/object-list-response.dto';
 import { StorageObjectResponseDto } from './dto/storage-object-response.dto';
 import { UploadObjectRequestDto } from './dto/upload-object-request.dto';
 import { ObjectsService } from './objects.service';
+import { UploadCleanupInterceptor } from './upload-cleanup.interceptor';
+import { UploadProblemDetailsFilter } from './upload-problem-details.filter';
 
 @ApiTags('Objects')
 @ApiSecurity('apiKeyAuth')
@@ -52,7 +56,8 @@ export class ObjectsController {
   }
 
   @Post()
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(UploadCleanupInterceptor, FileInterceptor('file'))
+  @UseFilters(UploadProblemDetailsFilter)
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -65,6 +70,24 @@ export class ObjectsController {
     }
   })
   @ApiCreatedResponse({ type: StorageObjectResponseDto })
+  @ApiResponse({
+    status: 413,
+    description: 'Arquivo excede o limite configurado',
+    content: {
+      'application/problem+json': {
+        schema: {
+          type: 'object',
+          required: ['type', 'title', 'status', 'detail'],
+          properties: {
+            type: { type: 'string', format: 'uri' },
+            title: { type: 'string' },
+            status: { type: 'integer', example: 413 },
+            detail: { type: 'string' }
+          }
+        }
+      }
+    }
+  })
   @ApiUnauthorizedResponse({ description: 'Invalid or missing API key' })
   uploadObject(
     @CurrentApiKey() apiKey: ApiKeyAuthContext,

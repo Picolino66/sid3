@@ -3,6 +3,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './modules/app.module';
+import { getUploadRequestTimeoutMs } from './config/upload.config';
+import type { Server } from 'http';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -28,6 +30,8 @@ async function bootstrap(): Promise<void> {
   SwaggerModule.setup('docs', app, document);
 
   const port = Number(process.env.PORT ?? 3000);
+  const server = app.getHttpServer() as Server;
+  server.requestTimeout = getUploadRequestTimeoutMs();
   await app.listen(port);
 }
 

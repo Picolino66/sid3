@@ -12,7 +12,8 @@ export type UploadObjectInput = {
   integration: StorageProviderIntegrationCredentials;
   fileName: string;
   contentType: string;
-  content: Buffer;
+  createReadStream: () => Readable;
+  sizeBytes: number;
   parentFolderId?: string | null;
 };
 

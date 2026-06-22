@@ -10,6 +10,7 @@ const driveGet = jest.fn();
 const driveDelete = jest.fn();
 const driveList = jest.fn();
 const setCredentials = jest.fn();
+const oauthRequest = jest.fn();
 
 jest.mock('googleapis', () => ({
   google: {
@@ -26,7 +27,8 @@ jest.mock('googleapis', () => ({
 
 jest.mock('google-auth-library', () => ({
   OAuth2Client: jest.fn().mockImplementation(() => ({
-    setCredentials
+    setCredentials,
+    request: oauthRequest
   }))
 }));
 
@@ -71,7 +73,8 @@ describe(GoogleDriveStorageProvider.name, () => {
       integration,
       fileName: 'avatar.png',
       contentType: 'image/png',
-      content: Buffer.from('file'),
+      createReadStream: () => Readable.from(Buffer.from('file')),
+      sizeBytes: 4,
       parentFolderId: 'folder-id'
     });
 
@@ -115,7 +118,8 @@ describe(GoogleDriveStorageProvider.name, () => {
       },
       fileName: 'notes.txt',
       contentType: 'text/plain',
-      content: Buffer.from('hello')
+      createReadStream: () => Readable.from(Buffer.from('hello')),
+      sizeBytes: 5
     });
 
     expect(setCredentials).toHaveBeenCalledWith({
@@ -137,6 +141,57 @@ describe(GoogleDriveStorageProvider.name, () => {
       contentType: 'text/plain',
       sizeBytes: Buffer.from('hello').byteLength
     });
+  });
+
+  it('uses a resumable session for files larger than 5 MB', async () => {
+    const chunkSize = 8 * 1024 * 1024;
+    const content = Buffer.alloc(10 * 1024 * 1024, 1);
+    oauthRequest
+      .mockResolvedValueOnce({
+        headers: { get: (name: string) => name === 'location' ? 'https://upload.example/session' : null }
+      })
+      .mockResolvedValueOnce({
+        status: 308,
+        headers: { get: (name: string) => name === 'range' ? `bytes=0-${chunkSize - 1}` : null },
+        data: {}
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { get: () => null },
+        data: {
+          id: 'large-file-id',
+          name: 'video.mp4',
+          mimeType: 'video/mp4',
+          size: String(content.length)
+        }
+      });
+
+    const response = await provider.uploadObject({
+      integration,
+      fileName: 'video.mp4',
+      contentType: 'video/mp4',
+      createReadStream: () => Readable.from(content),
+      sizeBytes: content.length,
+      parentFolderId: 'folder-id'
+    });
+
+    expect(oauthRequest).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      method: 'POST',
+      params: expect.objectContaining({ uploadType: 'resumable' })
+    }));
+    expect(oauthRequest).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      method: 'PUT',
+      url: 'https://upload.example/session',
+      headers: expect.objectContaining({
+        'Content-Range': `bytes 0-${chunkSize - 1}/${content.length}`
+      })
+    }));
+    expect(oauthRequest).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      headers: expect.objectContaining({
+        'Content-Range': `bytes ${chunkSize}-${content.length - 1}/${content.length}`
+      })
+    }));
+    expect(response.providerFileId).toBe('large-file-id');
   });
 
   it('downloads an object stream and metadata', async () => {
@@ -210,7 +265,8 @@ describe(GoogleDriveStorageProvider.name, () => {
         integration,
         fileName: 'avatar.png',
         contentType: 'image/png',
-        content: Buffer.from('file')
+        createReadStream: () => Readable.from(Buffer.from('file')),
+        sizeBytes: 4
       })
     ).rejects.toBeInstanceOf(BadGatewayException);
   });
@@ -238,7 +294,8 @@ describe(GoogleDriveStorageProvider.name, () => {
         integration,
         fileName: 'avatar.png',
         contentType: 'image/png',
-        content: Buffer.from('file')
+        createReadStream: () => Readable.from(Buffer.from('file')),
+        sizeBytes: 4
       })
     ).rejects.toBeInstanceOf(BadGatewayException);
   });

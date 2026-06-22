@@ -13,12 +13,14 @@ import { ProjectsModule } from './projects/projects.module';
 import { StorageProvidersModule } from './storage-providers/storage-providers.module';
 import { StoragePoolsModule } from './storage-pools/storage-pools.module';
 import { StatsModule } from './stats/stats.module';
+import { validateUploadEnvironment } from '../config/upload.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [resolve(__dirname, '../../../../.env'), resolve(__dirname, '../../.env')]
+      envFilePath: [resolve(__dirname, '../../../../.env'), resolve(__dirname, '../../.env')],
+      validate: validateUploadEnvironment
     }),
     PrismaModule,
     AuthModule,

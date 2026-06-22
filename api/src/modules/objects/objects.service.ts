@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OperationStatus, OperationType, Prisma, Provider, StorageObjectStatus } from '@prisma/client';
 import { createHash } from 'crypto';
+import { createReadStream } from 'fs';
 import { Readable } from 'stream';
 import { ApiKeyAuthContext } from '../../common/auth/api-key-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -113,7 +114,7 @@ export class ObjectsService {
 
     await this.ensureObjectKeyAvailable(apiKey, bucketId, request.key, resolvedCredentials.provider);
     const parentFolderId = await this.resolveBucketFolderOnDrive(bucket, resolvedCredentials.integrationId, resolvedCredentials);
-    const checksumSha256 = createHash('sha256').update(file.buffer).digest('hex');
+    const checksumSha256 = await this.calculateChecksum(file);
     const storageObject = await this.createPendingObject(
       apiKey,
       bucketId,
@@ -131,7 +132,10 @@ export class ObjectsService {
         integration: resolvedCredentials,
         fileName: file.originalname,
         contentType: file.mimetype,
-        content: file.buffer,
+        createReadStream: () => file.path
+          ? createReadStream(file.path, { highWaterMark: 8 * 1024 * 1024 })
+          : Readable.from(file.buffer),
+        sizeBytes: file.size,
         parentFolderId
       });
 
@@ -656,5 +660,16 @@ export class ObjectsService {
     if (msg.includes('forbidden') || msg.includes('403')) return 'FORBIDDEN';
     if (msg.includes('not found') || msg.includes('404')) return 'NOT_FOUND';
     return 'PROVIDER_ERROR';
+  }
+
+  private async calculateChecksum(file: Express.Multer.File): Promise<string> {
+    const hash = createHash('sha256');
+    const stream = file.path ? createReadStream(file.path) : Readable.from(file.buffer);
+
+    for await (const chunk of stream) {
+      hash.update(chunk as Buffer);
+    }
+
+    return hash.digest('hex');
   }
 }

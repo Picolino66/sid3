@@ -134,7 +134,8 @@ describe(ObjectsService.name, () => {
     expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
       fileName: 'user.png',
       contentType: 'image/png',
-      content: Buffer.from('file')
+      createReadStream: expect.any(Function),
+      sizeBytes: 4
     }));
     expect(response.status).toBe(StorageObjectStatus.AVAILABLE);
   });

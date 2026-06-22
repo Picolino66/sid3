@@ -297,6 +297,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StorageObject'
+        '413':
+          description: File exceeds the configured upload limit
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /buckets/{bucketId}/objects/{objectId}/download:
     get:
       tags: [Objects]
@@ -669,4 +675,18 @@ components:
         message:
           type: string
         requestId:
+          type: string
+    ProblemDetails:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          enum: [413]
+        detail:
           type: string

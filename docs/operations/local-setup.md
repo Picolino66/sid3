@@ -67,7 +67,13 @@ GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 GOOGLE_OAUTH_REDIRECT_URI=http://localhost:4200/connections/google/callback
 GOOGLE_DRIVE_SCOPES=https://www.googleapis.com/auth/drive.file
+SID3_MAX_UPLOAD_MB=1024
+SID3_UPLOAD_TMP_DIR=/tmp/sid3-uploads
+SID3_UPLOAD_REQUEST_TIMEOUT_MS=1800000
+SID3_DRIVE_CHUNK_TIMEOUT_MS=600000
 ```
+
+O diretório em `SID3_UPLOAD_TMP_DIR` precisa ter espaço e permissão de escrita para a API. Em produção, alinhe o limite de body e os timeouts do proxy/ingress com esses valores.
 
 Gerar segredos locais:
 

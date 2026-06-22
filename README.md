@@ -112,7 +112,13 @@ GOOGLE_OAUTH_CLIENT_ID=seu-client-id
 GOOGLE_OAUTH_CLIENT_SECRET=seu-client-secret
 GOOGLE_OAUTH_REDIRECT_URI=http://localhost:4200/connections/google/callback
 GOOGLE_DRIVE_SCOPES=https://www.googleapis.com/auth/drive.file
+SID3_MAX_UPLOAD_MB=1024
+SID3_UPLOAD_TMP_DIR=/tmp/sid3-uploads
+SID3_UPLOAD_REQUEST_TIMEOUT_MS=1800000
+SID3_DRIVE_CHUNK_TIMEOUT_MS=600000
 ```
+
+Uploads são gravados temporariamente em disco e enviados ao Google Drive por sessão retomável quando ultrapassam 5 MB. Garanta espaço para o maior upload aceito e configure o proxy reverso com limite e timeout compatíveis.
 
 Se você baixar o JSON da credencial OAuth, mantenha esse arquivo apenas para uso local em:
 
