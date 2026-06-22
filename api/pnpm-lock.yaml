@@ -44,6 +44,9 @@ importers:
       googleapis:
         specifier: ^172.0.0
         version: 172.0.0
+      multer:
+        specifier: 2.1.1
+        version: 2.1.1
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
