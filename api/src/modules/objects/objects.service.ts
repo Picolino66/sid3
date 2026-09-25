@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { OperationStatus, OperationType, Prisma, Provider, StorageObjectStatus } from '@prisma/client';
+import { OperationStatus, OperationType, Prisma, Provider, Sid3RootFolderStatus, StorageObjectStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
@@ -63,6 +63,7 @@ type BucketWithIntegration = {
 
 @Injectable()
 export class ObjectsService {
+  private static readonly SID3_ROOT_FOLDER_NAME = 'sid3';
   private readonly logger = new Logger(ObjectsService.name);
 
   constructor(
@@ -574,10 +575,23 @@ export class ObjectsService {
 
     if (bucket.providerIntegrationId) {
       if (bucket.providerRootRef) {
-        return bucket.providerRootRef;
+        if (await driveProvider.isFolderUsable(bucket.providerRootRef, credentials)) {
+          return bucket.providerRootRef;
+        }
+
+        await this.prisma.bucket.update({
+          where: { id: bucket.id, providerRootRef: bucket.providerRootRef },
+          data: { providerRootRef: null },
+          select: { id: true }
+        }).catch(() => undefined);
       }
 
-      const folderId = await driveProvider.findOrCreateFolder(bucket.name, credentials);
+      const folderId = await this.findOrCreateBucketFolder(
+        driveProvider,
+        bucket.providerIntegrationId,
+        bucket.name,
+        credentials
+      );
 
       await this.prisma.bucket.update({
         where: { id: bucket.id, providerRootRef: null },
@@ -599,10 +613,25 @@ export class ObjectsService {
     });
 
     if (existing) {
-      return existing.folderId;
+      if (await driveProvider.isFolderUsable(existing.folderId, credentials)) {
+        return existing.folderId;
+      }
+
+      await this.prisma.bucketFolderRef.deleteMany({
+        where: {
+          bucketId: bucket.id,
+          providerIntegrationId: resolvedIntegrationId,
+          folderId: existing.folderId
+        }
+      });
     }
 
-    const folderId = await driveProvider.findOrCreateFolder(bucket.name, credentials);
+    const folderId = await this.findOrCreateBucketFolder(
+      driveProvider,
+      resolvedIntegrationId,
+      bucket.name,
+      credentials
+    );
 
     try {
       await this.prisma.bucketFolderRef.create({
@@ -630,6 +659,88 @@ export class ObjectsService {
     }
 
     return folderId;
+  }
+
+  private async findOrCreateBucketFolder(
+    driveProvider: GoogleDriveStorageProvider,
+    integrationId: string,
+    bucketName: string,
+    credentials: StorageProviderIntegrationCredentials
+  ): Promise<string> {
+    const sid3RootFolderId = await this.resolveSid3RootFolder(integrationId, driveProvider, credentials);
+
+    return driveProvider.findOrCreateFolder(bucketName, credentials, sid3RootFolderId);
+  }
+
+  /**
+   * Resolves and caches the `sid3` root folder for a connection. A pasta encontrada que já
+   * existia (não criada por nós) fica em PENDING_CONFIRMATION e bloqueia uploads até que o
+   * usuário confirme ou recuse o uso dela em Conexões — ver ADR-0012.
+   */
+  private async resolveSid3RootFolder(
+    integrationId: string,
+    driveProvider: GoogleDriveStorageProvider,
+    credentials: StorageProviderIntegrationCredentials
+  ): Promise<string> {
+    const integration = await this.prisma.providerIntegration.findUniqueOrThrow({
+      where: { id: integrationId },
+      select: { sid3RootFolderRef: true, sid3RootFolderStatus: true }
+    });
+
+    if (integration.sid3RootFolderStatus === Sid3RootFolderStatus.CONFIRMED && integration.sid3RootFolderRef) {
+      if (await driveProvider.isFolderUsable(integration.sid3RootFolderRef, credentials)) {
+        return integration.sid3RootFolderRef;
+      }
+
+      await this.prisma.providerIntegration.updateMany({
+        where: { id: integrationId, sid3RootFolderRef: integration.sid3RootFolderRef },
+        data: { sid3RootFolderRef: null, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED }
+      });
+
+      return this.resolveSid3RootFolder(integrationId, driveProvider, credentials);
+    }
+
+    if (integration.sid3RootFolderStatus === Sid3RootFolderStatus.PENDING_CONFIRMATION) {
+      throw new ConflictException(this.sid3RootConfirmationRequiredMessage());
+    }
+
+    const existingFolderId = await driveProvider.findFolderByName(ObjectsService.SID3_ROOT_FOLDER_NAME, credentials);
+
+    if (existingFolderId) {
+      const claimed = await this.prisma.providerIntegration.updateMany({
+        where: { id: integrationId, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED },
+        data: {
+          sid3RootFolderRef: existingFolderId,
+          sid3RootFolderStatus: Sid3RootFolderStatus.PENDING_CONFIRMATION
+        }
+      });
+
+      if (claimed.count === 0) {
+        return this.resolveSid3RootFolder(integrationId, driveProvider, credentials);
+      }
+
+      throw new ConflictException(this.sid3RootConfirmationRequiredMessage());
+    }
+
+    const createdFolderId = await driveProvider.createFolder(ObjectsService.SID3_ROOT_FOLDER_NAME, credentials);
+
+    const claimed = await this.prisma.providerIntegration.updateMany({
+      where: { id: integrationId, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED },
+      data: {
+        sid3RootFolderRef: createdFolderId,
+        sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+      }
+    });
+
+    if (claimed.count === 0) {
+      return this.resolveSid3RootFolder(integrationId, driveProvider, credentials);
+    }
+
+    return createdFolderId;
+  }
+
+  private sid3RootConfirmationRequiredMessage(): string {
+    return 'Encontramos uma pasta "sid3" já existente nesta conta do Google Drive. Confirme ou recuse o uso dela em Conexões antes de enviar novos arquivos.';
   }
 
   private isUniqueObjectKeyError(error: unknown): boolean {

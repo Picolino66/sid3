@@ -1,5 +1,5 @@
 import { BadGatewayException, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { OperationStatus, OperationType, Prisma, Provider, StorageObjectStatus } from '@prisma/client';
+import { OperationStatus, OperationType, Prisma, Provider, Sid3RootFolderStatus, StorageObjectStatus } from '@prisma/client';
 import { Readable } from 'stream';
 import { ApiKeyAuthContext } from '../../common/auth/api-key-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,12 +34,21 @@ describe(ObjectsService.name, () => {
 
   let prisma: {
     bucket: { findFirst: jest.Mock; update: jest.Mock };
-    bucketFolderRef: { findUnique: jest.Mock; findUniqueOrThrow: jest.Mock; create: jest.Mock };
+    bucketFolderRef: { findUnique: jest.Mock; findUniqueOrThrow: jest.Mock; create: jest.Mock; deleteMany: jest.Mock };
+    providerIntegration: { findUniqueOrThrow: jest.Mock; updateMany: jest.Mock };
     project: { findUnique: jest.Mock };
     storageObject: { create: jest.Mock; findFirst: jest.Mock; findMany: jest.Mock; update: jest.Mock };
     operationLog: { create: jest.Mock };
   };
-  let provider: { uploadObject: jest.Mock; downloadObject: jest.Mock; deleteObject: jest.Mock; findOrCreateFolder: jest.Mock };
+  let provider: {
+    uploadObject: jest.Mock;
+    downloadObject: jest.Mock;
+    deleteObject: jest.Mock;
+    findOrCreateFolder: jest.Mock;
+    findFolderByName: jest.Mock;
+    createFolder: jest.Mock;
+    isFolderUsable: jest.Mock;
+  };
   let service: ObjectsService;
 
   beforeEach(() => {
@@ -51,7 +60,15 @@ describe(ObjectsService.name, () => {
       bucketFolderRef: {
         findUnique: jest.fn().mockResolvedValue(null),
         findUniqueOrThrow: jest.fn(),
-        create: jest.fn().mockResolvedValue({ id: 'ref-id' })
+        create: jest.fn().mockResolvedValue({ id: 'ref-id' }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 })
+      },
+      providerIntegration: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          sid3RootFolderRef: null,
+          sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 })
       },
       project: { findUnique: jest.fn().mockResolvedValue({ ownerUserId: 'owner-id' }) },
       storageObject: {
@@ -66,7 +83,10 @@ describe(ObjectsService.name, () => {
       uploadObject: jest.fn(),
       downloadObject: jest.fn(),
       deleteObject: jest.fn(),
-      findOrCreateFolder: jest.fn().mockResolvedValue('drive-folder-id')
+      findOrCreateFolder: jest.fn().mockResolvedValue('drive-folder-id'),
+      findFolderByName: jest.fn().mockResolvedValue(null),
+      createFolder: jest.fn().mockResolvedValue('sid3-root-folder-id'),
+      isFolderUsable: jest.fn().mockResolvedValue(true)
     };
     const registry = {
       getProvider: jest.fn().mockReturnValue(provider)
@@ -331,10 +351,20 @@ describe(ObjectsService.name, () => {
       prisma.storageObject.update.mockResolvedValue(persistedObject({ id: 'object-id', key: 'photo.png' }));
     });
 
-    it('finds or creates folder for direct bucket without cached ref and persists the folder id', async () => {
+    it('cria o bucket dentro da pasta raiz sid3 e persiste o id da pasta do bucket', async () => {
       await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
 
-      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object));
+      expect(prisma.providerIntegration.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: integrationId },
+        select: { sid3RootFolderRef: true, sid3RootFolderStatus: true }
+      });
+      expect(provider.findFolderByName).toHaveBeenCalledWith('sid3', expect.any(Object));
+      expect(provider.createFolder).toHaveBeenCalledWith('sid3', expect.any(Object));
+      expect(prisma.providerIntegration.updateMany).toHaveBeenCalledWith({
+        where: { id: integrationId, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED },
+        data: { sid3RootFolderRef: 'sid3-root-folder-id', sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED }
+      });
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object), 'sid3-root-folder-id');
       expect(prisma.bucket.update).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: bucketId, providerRootRef: null },
         data: { providerRootRef: 'drive-folder-id' }
@@ -349,13 +379,121 @@ describe(ObjectsService.name, () => {
 
       await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
 
+      expect(provider.isFolderUsable).toHaveBeenCalledWith('cached-folder-id', expect.any(Object));
       expect(provider.findOrCreateFolder).not.toHaveBeenCalled();
+      expect(prisma.providerIntegration.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
         parentFolderId: 'cached-folder-id'
       }));
     });
 
-    it('creates BucketFolderRef for pool bucket without cached ref', async () => {
+    it('recria a pasta do bucket quando o providerRootRef em cache aponta para uma pasta na lixeira', async () => {
+      prisma.bucket.findFirst.mockResolvedValue({ ...bucket, providerRootRef: 'trashed-folder-id' });
+      provider.isFolderUsable.mockResolvedValue(false);
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.isFolderUsable).toHaveBeenCalledWith('trashed-folder-id', expect.any(Object));
+      expect(prisma.bucket.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: bucketId, providerRootRef: 'trashed-folder-id' },
+        data: { providerRootRef: null }
+      }));
+      expect(provider.createFolder).toHaveBeenCalledWith('sid3', expect.any(Object));
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object), 'sid3-root-folder-id');
+      expect(prisma.bucket.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: bucketId, providerRootRef: null },
+        data: { providerRootRef: 'drive-folder-id' }
+      }));
+      expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
+        parentFolderId: 'drive-folder-id'
+      }));
+    });
+
+    it('reutiliza a pasta raiz sid3 já confirmada sem chamar o Drive novamente', async () => {
+      prisma.providerIntegration.findUniqueOrThrow.mockResolvedValue({
+        sid3RootFolderRef: 'confirmed-sid3-id',
+        sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+      });
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.isFolderUsable).toHaveBeenCalledWith('confirmed-sid3-id', expect.any(Object));
+      expect(provider.findFolderByName).not.toHaveBeenCalled();
+      expect(provider.createFolder).not.toHaveBeenCalled();
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object), 'confirmed-sid3-id');
+    });
+
+    it('recria a pasta raiz sid3 quando a confirmada em cache foi apagada no Drive', async () => {
+      prisma.providerIntegration.findUniqueOrThrow
+        .mockResolvedValueOnce({
+          sid3RootFolderRef: 'trashed-sid3-id',
+          sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+        })
+        .mockResolvedValueOnce({
+          sid3RootFolderRef: null,
+          sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED
+        });
+      provider.isFolderUsable.mockResolvedValue(false);
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(prisma.providerIntegration.updateMany).toHaveBeenCalledWith({
+        where: { id: integrationId, sid3RootFolderRef: 'trashed-sid3-id' },
+        data: { sid3RootFolderRef: null, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED }
+      });
+      expect(provider.createFolder).toHaveBeenCalledWith('sid3', expect.any(Object));
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object), 'sid3-root-folder-id');
+    });
+
+    it('bloqueia o upload quando encontra uma pasta "sid3" pré-existente e pede confirmação do usuário', async () => {
+      provider.findFolderByName.mockResolvedValue('pre-existing-sid3-id');
+
+      await expect(
+        service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile)
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.providerIntegration.updateMany).toHaveBeenCalledWith({
+        where: { id: integrationId, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED },
+        data: { sid3RootFolderRef: 'pre-existing-sid3-id', sid3RootFolderStatus: Sid3RootFolderStatus.PENDING_CONFIRMATION }
+      });
+      expect(provider.createFolder).not.toHaveBeenCalled();
+      expect(prisma.storageObject.create).not.toHaveBeenCalled();
+    });
+
+    it('bloqueia o upload quando a pasta "sid3" já está aguardando confirmação', async () => {
+      prisma.providerIntegration.findUniqueOrThrow.mockResolvedValue({
+        sid3RootFolderRef: 'pre-existing-sid3-id',
+        sid3RootFolderStatus: Sid3RootFolderStatus.PENDING_CONFIRMATION
+      });
+
+      await expect(
+        service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile)
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(provider.findFolderByName).not.toHaveBeenCalled();
+      expect(provider.createFolder).not.toHaveBeenCalled();
+      expect(prisma.storageObject.create).not.toHaveBeenCalled();
+    });
+
+    it('relê o estado da pasta raiz sid3 quando perde a corrida de criação para outra requisição', async () => {
+      prisma.providerIntegration.findUniqueOrThrow
+        .mockResolvedValueOnce({
+          sid3RootFolderRef: null,
+          sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED
+        })
+        .mockResolvedValueOnce({
+          sid3RootFolderRef: 'winner-sid3-id',
+          sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+        });
+      prisma.providerIntegration.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(prisma.providerIntegration.findUniqueOrThrow).toHaveBeenCalledTimes(2);
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object), 'winner-sid3-id');
+    });
+
+    it('cria o bucket de pool dentro da pasta raiz sid3 da integração selecionada', async () => {
       const poolBucket = {
         ...bucket,
         providerIntegrationId: null,
@@ -391,7 +529,13 @@ describe(ObjectsService.name, () => {
 
       await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
 
-      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object));
+      expect(prisma.providerIntegration.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'pool-integration-id' },
+        select: { sid3RootFolderRef: true, sid3RootFolderStatus: true }
+      });
+      expect(provider.findFolderByName).toHaveBeenCalledWith('sid3', expect.any(Object));
+      expect(provider.createFolder).toHaveBeenCalledWith('sid3', expect.any(Object));
+      expect(provider.findOrCreateFolder).toHaveBeenCalledWith('fotos', expect.any(Object), 'sid3-root-folder-id');
       expect(prisma.bucketFolderRef.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
           bucketId,
@@ -441,9 +585,62 @@ describe(ObjectsService.name, () => {
 
       await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
 
+      expect(provider.isFolderUsable).toHaveBeenCalledWith('cached-pool-folder-id', expect.any(Object));
       expect(provider.findOrCreateFolder).not.toHaveBeenCalled();
+      expect(prisma.providerIntegration.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(provider.uploadObject).toHaveBeenCalledWith(expect.objectContaining({
         parentFolderId: 'cached-pool-folder-id'
+      }));
+    });
+
+    it('recria o BucketFolderRef de pool quando a pasta em cache foi apagada no Drive', async () => {
+      const poolBucket = {
+        ...bucket,
+        providerIntegrationId: null,
+        providerIntegration: null,
+        storagePoolId: 'pool-id',
+        storagePool: {
+          strategy: 'ROUND_ROBIN',
+          members: [{
+            id: 'member-id',
+            providerIntegrationId: 'pool-integration-id',
+            weight: 1,
+            roundRobinIndex: 0,
+            providerIntegration: {
+              provider: Provider.GOOGLE_DRIVE,
+              encryptedAccessToken: 'encrypted-access',
+              encryptedRefreshToken: null,
+              tokenExpiresAt: null
+            }
+          }]
+        }
+      };
+      prisma.bucket.findFirst.mockResolvedValue(poolBucket);
+      prisma.bucketFolderRef.findUnique.mockResolvedValue({ folderId: 'trashed-pool-folder-id' });
+      provider.isFolderUsable.mockResolvedValue(false);
+      const selectMember = jest.fn().mockResolvedValue({
+        memberId: 'member-id',
+        providerIntegrationId: 'pool-integration-id',
+        encryptedAccessToken: 'encrypted-access',
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
+      });
+      const registry = { getProvider: jest.fn().mockReturnValue(provider) } as unknown as StorageProviderRegistry;
+      const poolRoutingFactory = { getStrategy: jest.fn().mockReturnValue({ selectMember }) } as unknown as PoolRoutingFactory;
+      service = new ObjectsService(prisma as unknown as PrismaService, registry, poolRoutingFactory);
+
+      await service.uploadObject(apiKey, bucketId, { key: 'photo.png' }, uploadFile);
+
+      expect(provider.isFolderUsable).toHaveBeenCalledWith('trashed-pool-folder-id', expect.any(Object));
+      expect(prisma.bucketFolderRef.deleteMany).toHaveBeenCalledWith({
+        where: { bucketId, providerIntegrationId: 'pool-integration-id', folderId: 'trashed-pool-folder-id' }
+      });
+      expect(prisma.bucketFolderRef.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          bucketId,
+          providerIntegrationId: 'pool-integration-id',
+          folderId: 'drive-folder-id'
+        })
       }));
     });
 

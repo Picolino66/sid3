@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-0012
+
+> Esta decisão foi refinada para que as pastas de bucket sejam criadas dentro da
+> pasta raiz `sid3` de cada conexão Google Drive.
 
 ## Contexto
 

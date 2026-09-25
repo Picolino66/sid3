@@ -75,14 +75,14 @@
 - `provider_integration_id`: optional FK -> ProviderIntegration (direct single-drive bucket)
 - `storage_pool_id`: optional FK -> StoragePool (pool-backed bucket)
 - `name`: unique per project
-- `provider_root_ref`: optional — cached Google Drive folder ID for direct-drive buckets; lazily populated on first upload
+- `provider_root_ref`: optional — cached Google Drive bucket folder ID for direct-drive buckets; lazily populated on first upload inside the connection's `sid3` root folder
 - `created_at`, `updated_at`
 
 > Either `provider_integration_id` or `storage_pool_id` must be set, not both.
 
 ### BucketFolderRef
 
-Cache mapping a bucket to its corresponding Google Drive folder on each drive in a pool. For direct-drive buckets, `provider_root_ref` on the bucket is used instead.
+Cache mapping a bucket to its corresponding Google Drive folder on each drive in a pool. The folder is a child of that connection's `sid3` root folder. For direct-drive buckets, `provider_root_ref` on the bucket is used instead.
 
 - `id`: UUID primary key
 - `bucket_id`: FK -> Bucket (cascade delete)
@@ -100,7 +100,7 @@ Cache mapping a bucket to its corresponding Google Drive folder on each drive in
 - `resolved_integration_id`: optional FK -> ProviderIntegration — records which pool member was used; null for direct-drive buckets
 - `key`: required, unique per bucket for active objects
 - `provider`: enum, initially `GOOGLE_DRIVE`
-- `provider_file_id`: Google Drive file ID; file is stored inside the bucket's Drive folder
+- `provider_file_id`: Google Drive file ID; file is stored inside `sid3/<bucket>` in the connected Drive
 - `file_name`: required
 - `content_type`: required
 - `size_bytes`: integer
@@ -155,8 +155,8 @@ Cache mapping a bucket to its corresponding Google Drive folder on each drive in
 - API key creation: generate secret outside transaction, store hash inside transaction, return plaintext once.
 - API key regeneration: generate new secret outside transaction, update `prefix` and `secret_hash` in place, return new plaintext once; existing key ID is preserved.
 - OAuth callback: validate state, encrypt tokens, upsert provider integration, mark OAuth state consumed in one transaction.
-- Upload: resolve bucket Drive folder (find or create via Drive API, cache in `provider_root_ref` or `BucketFolderRef`), create object as `PENDING`, upload to provider folder, update metadata as `AVAILABLE`; failed provider upload marks object `FAILED`.
-- Drive folder resolution (lazy): on first upload to a bucket, search Drive for a folder named after the bucket; create if not found; cache folder ID to avoid repeat Drive API calls.
+- Upload: resolve the connection's `sid3` root and the bucket folder inside it (find or create via Drive API, cache the bucket folder in `provider_root_ref` or `BucketFolderRef`), create object as `PENDING`, upload to provider folder, update metadata as `AVAILABLE`; failed provider upload marks object `FAILED`.
+- Drive folder resolution (lazy): on the first upload to a bucket in a Drive, search the Drive root for `sid3`; create it if absent, then search or create the bucket folder within it. Cache the bucket folder ID to avoid repeat Drive API calls.
 - Download: read metadata and authorize in one transaction/read boundary, then stream from provider outside transaction.
 - Delete: mark object `DELETING`, delete or trash provider file, mark object `DELETED`; repeated delete is idempotent.
 - Operation logs are written for every external operation and must not contain secrets.

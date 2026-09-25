@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { Provider, ProviderIntegrationStatus, Prisma } from '@prisma/client';
+import { Provider, ProviderIntegrationStatus, Prisma, Sid3RootFolderStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { GoogleDriveStorageProvider } from '../storage-providers/google-drive-storage.provider';
+import { StorageProviderRegistry } from '../storage-providers/storage-provider.registry';
+import { ConfirmSid3RootFolderRequestDto } from './dto/confirm-sid3-root-folder-request.dto';
 import { ConnectionResponseDto } from './dto/connection-response.dto';
 import { OAuthCallbackRequestDto } from './dto/oauth-callback-request.dto';
 import { UpdateConnectionRequestDto } from './dto/update-connection-request.dto';
@@ -15,8 +18,11 @@ type PersistedConnection = {
   providerAccountEmail: string | null;
   status: ProviderIntegrationStatus;
   scopes: string[];
+  sid3RootFolderStatus: Sid3RootFolderStatus;
   createdAt: Date;
 };
+
+const SID3_ROOT_FOLDER_NAME = 'sid3';
 
 @Injectable()
 export class ConnectionsService {
@@ -26,7 +32,8 @@ export class ConnectionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly googleOAuthClient: GoogleOAuthClient,
-    private readonly tokenEncryptionService: TokenEncryptionService
+    private readonly tokenEncryptionService: TokenEncryptionService,
+    private readonly storageProviderRegistry: StorageProviderRegistry
   ) {}
 
   async createGoogleAuthorizationUrl(userId: string): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
@@ -200,6 +207,63 @@ export class ConnectionsService {
     return this.toConnectionResponse(revoked);
   }
 
+  async confirmSid3RootFolder(
+    userId: string,
+    connectionId: string,
+    dto: ConfirmSid3RootFolderRequestDto
+  ): Promise<ConnectionResponseDto> {
+    await this.ensureUserExists(userId);
+
+    const connection = await this.prisma.providerIntegration.findFirst({
+      where: { id: connectionId, userId },
+      select: {
+        id: true,
+        provider: true,
+        encryptedAccessToken: true,
+        encryptedRefreshToken: true,
+        tokenExpiresAt: true,
+        sid3RootFolderStatus: true
+      }
+    });
+
+    if (!connection) {
+      throw new NotFoundException('Conexão não encontrada');
+    }
+
+    if (connection.sid3RootFolderStatus !== Sid3RootFolderStatus.PENDING_CONFIRMATION) {
+      throw new BadRequestException('Não há confirmação pendente para a pasta "sid3" desta conexão');
+    }
+
+    if (dto.decision === 'DECLINE') {
+      const driveProvider = this.storageProviderRegistry.getProvider(connection.provider) as GoogleDriveStorageProvider;
+      const newFolderId = await driveProvider.createFolder(SID3_ROOT_FOLDER_NAME, connection);
+
+      const updated = await this.prisma.providerIntegration.update({
+        where: { id: connection.id },
+        data: { sid3RootFolderRef: newFolderId, sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED },
+        select: this.connectionSelect()
+      });
+
+      this.logger.log(
+        `Declined pre-existing sid3 root folder for connection=${this.maskId(connection.id)} user=${this.maskId(userId)}; created a new one`
+      );
+
+      return this.toConnectionResponse(updated);
+    }
+
+    const updated = await this.prisma.providerIntegration.update({
+      where: { id: connection.id },
+      data: { sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED },
+      select: this.connectionSelect()
+    });
+
+    this.logger.log(
+      `Confirmed reuse of pre-existing sid3 root folder for connection=${this.maskId(connection.id)} user=${this.maskId(userId)}`
+    );
+
+    return this.toConnectionResponse(updated);
+  }
+
   private async logOAuthStateDiagnostics(userId: string, state: string): Promise<void> {
     const stateHash = this.hashState(state);
     const stateRecord = await this.prisma.oAuthState.findFirst({
@@ -320,6 +384,7 @@ export class ConnectionsService {
       providerAccountEmail: connection.providerAccountEmail,
       status: connection.status,
       scopes: connection.scopes,
+      sid3RootFolderStatus: connection.sid3RootFolderStatus,
       createdAt: connection.createdAt.toISOString()
     };
   }
@@ -332,6 +397,7 @@ export class ConnectionsService {
       providerAccountEmail: true,
       status: true,
       scopes: true,
+      sid3RootFolderStatus: true,
       createdAt: true
     };
   }

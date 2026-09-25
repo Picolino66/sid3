@@ -1,7 +1,8 @@
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { Provider, ProviderIntegrationStatus } from '@prisma/client';
+import { Provider, ProviderIntegrationStatus, Sid3RootFolderStatus } from '@prisma/client';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageProviderRegistry } from '../storage-providers/storage-provider.registry';
 import { GoogleOAuthClient } from './google-oauth.client';
 import { ConnectionsService } from './connections.service';
 
@@ -32,6 +33,7 @@ describe(ConnectionsService.name, () => {
     providerAccountEmail: null,
     status: ProviderIntegrationStatus.CONNECTED,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
+    sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED,
     createdAt
   };
 
@@ -40,6 +42,7 @@ describe(ConnectionsService.name, () => {
   let providerIntegrationDelegate: ProviderIntegrationDelegateMock;
   let googleOAuthClient: jest.Mocked<Pick<GoogleOAuthClient, 'createAuthorizationUrl' | 'exchangeCode'>>;
   let tokenEncryptionService: jest.Mocked<Pick<TokenEncryptionService, 'encrypt' | 'decrypt'>>;
+  let storageProviderRegistry: jest.Mocked<Pick<StorageProviderRegistry, 'getProvider'>>;
   let service: ConnectionsService;
 
   beforeEach(() => {
@@ -65,6 +68,9 @@ describe(ConnectionsService.name, () => {
       encrypt: jest.fn((value: string) => `encrypted:${value}`),
       decrypt: jest.fn()
     };
+    storageProviderRegistry = {
+      getProvider: jest.fn()
+    };
 
     const transaction = jest.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
@@ -83,7 +89,8 @@ describe(ConnectionsService.name, () => {
     service = new ConnectionsService(
       prisma,
       googleOAuthClient as unknown as GoogleOAuthClient,
-      tokenEncryptionService as unknown as TokenEncryptionService
+      tokenEncryptionService as unknown as TokenEncryptionService,
+      storageProviderRegistry as unknown as StorageProviderRegistry
     );
   });
 
@@ -139,6 +146,7 @@ describe(ConnectionsService.name, () => {
       providerAccountEmail: null,
       status: ProviderIntegrationStatus.CONNECTED,
       scopes: ['https://www.googleapis.com/auth/drive.file'],
+      sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED,
       createdAt: createdAt.toISOString()
     });
   });
@@ -301,5 +309,72 @@ describe(ConnectionsService.name, () => {
     userDelegate.findUnique.mockResolvedValue(null);
 
     await expect(service.createGoogleAuthorizationUrl(userId)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  describe('confirmSid3RootFolder', () => {
+    const pendingConnection = {
+      ...persistedConnection,
+      encryptedAccessToken: 'encrypted:access-token',
+      encryptedRefreshToken: 'encrypted:refresh-token',
+      tokenExpiresAt: null,
+      sid3RootFolderStatus: Sid3RootFolderStatus.PENDING_CONFIRMATION
+    };
+
+    it('confirms reuse of the pre-existing sid3 folder', async () => {
+      providerIntegrationDelegate.findFirst.mockResolvedValue(pendingConnection);
+      providerIntegrationDelegate.update.mockResolvedValue({
+        ...persistedConnection,
+        sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+      });
+
+      const response = await service.confirmSid3RootFolder(userId, persistedConnection.id, { decision: 'CONFIRM' });
+
+      expect(providerIntegrationDelegate.update).toHaveBeenCalledWith({
+        where: { id: persistedConnection.id },
+        data: { sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED },
+        select: expect.any(Object)
+      });
+      expect(storageProviderRegistry.getProvider).not.toHaveBeenCalled();
+      expect(response.sid3RootFolderStatus).toBe(Sid3RootFolderStatus.CONFIRMED);
+    });
+
+    it('declines the pre-existing folder and creates a new one via the storage provider', async () => {
+      providerIntegrationDelegate.findFirst.mockResolvedValue(pendingConnection);
+      const createFolder = jest.fn().mockResolvedValue('new-sid3-folder-id');
+      storageProviderRegistry.getProvider.mockReturnValue({ createFolder } as never);
+      providerIntegrationDelegate.update.mockResolvedValue({
+        ...persistedConnection,
+        sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+      });
+
+      const response = await service.confirmSid3RootFolder(userId, persistedConnection.id, { decision: 'DECLINE' });
+
+      expect(createFolder).toHaveBeenCalledWith('sid3', pendingConnection);
+      expect(providerIntegrationDelegate.update).toHaveBeenCalledWith({
+        where: { id: persistedConnection.id },
+        data: { sid3RootFolderRef: 'new-sid3-folder-id', sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED },
+        select: expect.any(Object)
+      });
+      expect(response.sid3RootFolderStatus).toBe(Sid3RootFolderStatus.CONFIRMED);
+    });
+
+    it('rejects confirmation when there is no pending sid3 folder', async () => {
+      providerIntegrationDelegate.findFirst.mockResolvedValue({
+        ...pendingConnection,
+        sid3RootFolderStatus: Sid3RootFolderStatus.CONFIRMED
+      });
+
+      await expect(
+        service.confirmSid3RootFolder(userId, persistedConnection.id, { decision: 'CONFIRM' })
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects confirmation for connections outside the current user', async () => {
+      providerIntegrationDelegate.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.confirmSid3RootFolder(userId, persistedConnection.id, { decision: 'CONFIRM' })
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 });

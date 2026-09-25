@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { finalize } from 'rxjs';
 import { toApiErrorMessage } from '../../core/api/api-error';
-import { Connection } from './connection.models';
+import { Connection, Sid3RootFolderDecision } from './connection.models';
 import { ConnectionsService } from './connections.service';
 
 @Component({
@@ -71,9 +71,21 @@ import { ConnectionsService } from './connections.service';
                 <span [class]="'status-label ' + connection.status.toLowerCase()">
                   {{ connection.status === 'CONNECTED' ? 'Conectado' : connection.status === 'REVOKED' ? 'Revogado' : 'Erro' }}
                 </span>
+                @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
+                  <span class="status-label pending_confirmation">Pasta sid3 pendente</span>
+                }
               </span>
               <span role="cell">{{ connection.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
               <span role="cell" class="action-cell">
+                @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
+                  <button
+                    class="compact-button"
+                    type="button"
+                    (click)="openSid3RootDialog(connection)"
+                  >
+                    Resolver pasta sid3
+                  </button>
+                }
                 <button
                   class="compact-button"
                   type="button"
@@ -97,6 +109,55 @@ import { ConnectionsService } from './connections.service';
         </div>
       }
     </section>
+
+    @if (sid3RootDialogConnection(); as connection) {
+      <div class="modal-overlay" role="presentation" (click)="closeSid3RootDialog()">
+        <div
+          class="modal-panel"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="sid3-root-dialog-title"
+          (click)="$event.stopPropagation()"
+        >
+          <h3 id="sid3-root-dialog-title">Pasta "sid3" já existe neste Google Drive</h3>
+          <p>
+            Encontramos uma pasta chamada <strong>sid3</strong> na raiz da conta
+            <strong>{{ connection.providerAccountEmail ?? connection.displayName ?? 'conectada' }}</strong>,
+            que não foi criada pelo SID3. Você pode reutilizar essa pasta para os uploads desta conexão ou
+            recusar e deixar o SID3 criar uma pasta "sid3" nova e exclusiva.
+          </p>
+          @if (sid3RootDialogError()) {
+            <p class="form-error">{{ sid3RootDialogError() }}</p>
+          }
+          <div class="modal-actions">
+            <button
+              class="secondary compact-button"
+              type="button"
+              [disabled]="isResolvingSid3Root()"
+              (click)="closeSid3RootDialog()"
+            >
+              Cancelar
+            </button>
+            <button
+              class="danger compact-button"
+              type="button"
+              [disabled]="isResolvingSid3Root()"
+              (click)="resolveSid3Root(connection, 'DECLINE')"
+            >
+              {{ isResolvingSid3Root() ? 'Processando...' : 'Recusar e criar nova' }}
+            </button>
+            <button
+              class="compact-button"
+              type="button"
+              [disabled]="isResolvingSid3Root()"
+              (click)="resolveSid3Root(connection, 'CONFIRM')"
+            >
+              {{ isResolvingSid3Root() ? 'Processando...' : 'Confirmar uso desta pasta' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
@@ -110,6 +171,9 @@ export class ConnectionsPageComponent {
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly editingId = signal<string | null>(null);
   protected readonly editingName = signal('');
+  protected readonly sid3RootDialogConnection = signal<Connection | null>(null);
+  protected readonly isResolvingSid3Root = signal(false);
+  protected readonly sid3RootDialogError = signal<string | null>(null);
 
   constructor() {
     this.loadConnections();
@@ -182,6 +246,34 @@ export class ConnectionsPageComponent {
       },
       error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
     });
+  }
+
+  openSid3RootDialog(connection: Connection): void {
+    this.sid3RootDialogError.set(null);
+    this.sid3RootDialogConnection.set(connection);
+  }
+
+  closeSid3RootDialog(): void {
+    if (this.isResolvingSid3Root()) {
+      return;
+    }
+    this.sid3RootDialogConnection.set(null);
+    this.sid3RootDialogError.set(null);
+  }
+
+  resolveSid3Root(connection: Connection, decision: Sid3RootFolderDecision): void {
+    this.sid3RootDialogError.set(null);
+    this.isResolvingSid3Root.set(true);
+    this.connectionsService
+      .confirmSid3RootFolder(connection.id, { decision })
+      .pipe(finalize(() => this.isResolvingSid3Root.set(false)))
+      .subscribe({
+        next: (updated) => {
+          this.connections.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+          this.sid3RootDialogConnection.set(null);
+        },
+        error: (error: unknown) => this.sid3RootDialogError.set(toApiErrorMessage(error))
+      });
   }
 
   private loadConnections(): void {

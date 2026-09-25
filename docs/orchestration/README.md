@@ -26,6 +26,8 @@ This directory stores the canonical engineering orchestration context for SID3.
 - `adr/ADR-0003-technology-stack.md`: technology stack decision.
 - `adr/ADR-0004-security-model.md`: security model decision.
 - `adr/ADR-0005-data-consistency.md`: data and provider consistency decision.
+- `adr/ADR-0009-bucket-as-drive-folder.md`: legacy bucket folder decision.
+- `adr/ADR-0012-pasta-raiz-sid3-no-google-drive.md`: root folder for SID3-managed Google Drive storage.
 - `../contracts/data-model.md`: v1 data model.
 - `../contracts/openapi-v1.yaml`: v1 REST API contract.
 - `../ux/journeys.md`: MVP user journeys.

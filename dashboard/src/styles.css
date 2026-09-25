@@ -795,3 +795,44 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+.status-label.pending_confirmation {
+  background: #fbe9d0;
+  color: #8a5a12;
+}
+
+.modal-overlay {
+  align-items: center;
+  background: rgba(15, 23, 31, 0.55);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 100;
+}
+
+.modal-panel {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(15, 23, 31, 0.35);
+  max-width: 480px;
+  padding: 24px;
+  width: 100%;
+}
+
+.modal-panel h3 {
+  margin-top: 0;
+}
+
+.modal-panel p {
+  color: #47535e;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}

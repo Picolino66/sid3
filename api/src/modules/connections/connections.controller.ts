@@ -10,6 +10,7 @@ import {
 import { CurrentUserContext } from '../../common/auth/current-user.decorator';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { CurrentUser } from '../../common/auth/types';
+import { ConfirmSid3RootFolderRequestDto } from './dto/confirm-sid3-root-folder-request.dto';
 import { ConnectionResponseDto } from './dto/connection-response.dto';
 import { OAuthAuthorizeResponseDto } from './dto/oauth-authorize-response.dto';
 import { OAuthCallbackRequestDto } from './dto/oauth-callback-request.dto';
@@ -79,5 +80,17 @@ export class ConnectionsController {
     @Param('connectionId') connectionId: string
   ): Promise<OAuthAuthorizeResponseDto> {
     return this.connectionsService.reauthorizeGoogle(user.id, connectionId);
+  }
+
+  @Post(':connectionId/sid3-root/confirm')
+  @ApiOkResponse({ type: ConnectionResponseDto })
+  @ApiNotFoundResponse({ description: 'Connection not found' })
+  @ApiUnauthorizedResponse({ description: 'Invalid or missing bearer token' })
+  confirmSid3RootFolder(
+    @CurrentUserContext() user: CurrentUser,
+    @Param('connectionId') connectionId: string,
+    @Body() dto: ConfirmSid3RootFolderRequestDto
+  ): Promise<ConnectionResponseDto> {
+    return this.connectionsService.confirmSid3RootFolder(user.id, connectionId, dto);
   }
 }

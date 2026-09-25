@@ -451,6 +451,12 @@
         "title": "Data and Provider Consistency Model",
         "status": "Accepted with risks",
         "path": "docs/orchestration/adr/ADR-0005-data-consistency.md"
+      },
+      {
+        "id": "ADR-0012",
+        "title": "Pasta raiz sid3 no Google Drive",
+        "status": "Accepted",
+        "path": "docs/orchestration/adr/ADR-0012-pasta-raiz-sid3-no-google-drive.md"
       }
     ]
   },
@@ -592,6 +598,7 @@
       "SHA-256 API key secret hashing",
       "Secret scanning script",
       "Storage provider port abstraction",
+      "Pasta raiz sid3 por conexão Google Drive",
       "Swagger/OpenAPI setup",
       "Virtual bucket lifecycle",
       "bcrypt password hashing"
@@ -768,6 +775,13 @@
         "summary": "Added formal OpenAPI contract validation with swagger-parser, wired it into CI, and added an interactive Google Drive smoke test script plus runbook for the final real-provider validation.",
         "status": "IN_PROGRESS",
         "artifact": "scripts/smoke-google-drive.mjs"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-08-10",
+        "summary": "Refined Google Drive upload organization so each bucket is resolved inside the sid3 root folder for its selected connection; legacy folder caches are invalidated by migration without moving files or object metadata.",
+        "status": "IN_PROGRESS",
+        "artifact": "api/src/modules/objects/objects.service.ts"
       }
     ]
   },

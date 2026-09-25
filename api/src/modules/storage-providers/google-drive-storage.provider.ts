@@ -323,6 +323,23 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     return this.createFolder(name, integration, parentFolderId);
   }
 
+  async isFolderUsable(
+    folderId: string,
+    integration: StorageProviderIntegrationCredentials
+  ): Promise<boolean> {
+    const drive = this.createDriveClient(integration);
+
+    try {
+      const response = await drive.files.get({ fileId: folderId, fields: 'id,trashed' });
+      return response.data.trashed !== true;
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        return false;
+      }
+      throw this.mapProviderError(error, 'Google Drive folder lookup failed');
+    }
+  }
+
   async getDriveQuota(
     integration: StorageProviderIntegrationCredentials
   ): Promise<{ limitBytes: string | null; usageBytes: string; usageInDriveBytes: string }> {
@@ -362,6 +379,17 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     });
 
     return client;
+  }
+
+  private isNotFoundError(error: unknown): boolean {
+    const status = (error as { code?: number | string; response?: { status?: number } })?.response?.status
+      ?? (error as { code?: number | string })?.code;
+
+    if (status === 404 || status === '404') {
+      return true;
+    }
+
+    return error instanceof Error && error.message.toLowerCase().includes('not found');
   }
 
   private mapProviderError(error: unknown, fallbackMessage: string): BadGatewayException {

@@ -110,6 +110,7 @@ F5 is in progress. The MVP product flow foundation is available and the local qu
 - Added Drive quota to stats: `GET /projects/:projectId/stats/storage` now includes `driveQuotaLimitBytes`, `driveQuotaUsageBytes`, `driveQuotaUsageInDriveBytes` per connection via `drive.about.get`.
 - Added Dashboard UX improvements: sidebar grouped by workflow order, setup checklist on Projects page, connection revoke confirmation, bucket name validation hint, API key secret banner with copy button, Drive quota display in Statistics page, pool card redesign, logs page redesign with filters in topbar, translated status labels throughout, Brazilian date format.
 - Added `renew` action on API key table: calls `/regenerate` endpoint, replaces key in list, shows new secret.
+- Refined Drive folder organization: new uploads now use `sid3/<bucket>` for each connected Drive. The migration `20260810000000_nest_buckets_under_sid3_root` invalidates only legacy folder caches so no files or object metadata are moved.
 
 ## Pending From F5
 

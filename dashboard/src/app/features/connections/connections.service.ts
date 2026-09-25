@@ -2,7 +2,13 @@ import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { SID3_API_BASE_URL } from '../../core/api/api.config';
-import { Connection, OAuthAuthorizeResponse, OAuthCallbackRequest, UpdateConnectionRequest } from './connection.models';
+import {
+  ConfirmSid3RootFolderRequest,
+  Connection,
+  OAuthAuthorizeResponse,
+  OAuthCallbackRequest,
+  UpdateConnectionRequest
+} from './connection.models';
 
 @Injectable({ providedIn: 'root' })
 export class ConnectionsService {
@@ -31,5 +37,9 @@ export class ConnectionsService {
 
   reauthorizeConnection(connectionId: string): Observable<OAuthAuthorizeResponse> {
     return this.http.post<OAuthAuthorizeResponse>(`${this.apiBaseUrl}/connections/${connectionId}/reauthorize`, {});
+  }
+
+  confirmSid3RootFolder(connectionId: string, request: ConfirmSid3RootFolderRequest): Observable<Connection> {
+    return this.http.post<Connection>(`${this.apiBaseUrl}/connections/${connectionId}/sid3-root/confirm`, request);
   }
 }
