@@ -70,7 +70,7 @@ describe(PublicSharesService.name, () => {
 
   let shareLink: { findUnique: jest.Mock; update: jest.Mock };
   let driveIndexEntry: { findUnique: jest.Mock; findMany: jest.Mock; count: jest.Mock };
-  let driveProvider: jest.Mocked<Pick<GoogleDriveStorageProvider, 'downloadDriveFile'>>;
+  let driveProvider: jest.Mocked<Pick<GoogleDriveStorageProvider, 'downloadDriveFile' | 'getVideoDurationMs'>>;
   let folderZipService: jest.Mocked<Pick<DriveFolderZipService, 'buildPlan' | 'sanitizeName'>>;
   let service: PublicSharesService;
   let queryRaw: jest.Mock;
@@ -96,7 +96,7 @@ describe(PublicSharesService.name, () => {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0)
     };
-    driveProvider = { downloadDriveFile: jest.fn() };
+    driveProvider = { downloadDriveFile: jest.fn(), getVideoDurationMs: jest.fn() };
 
     queryRaw = jest.fn();
     const prisma = {
@@ -239,12 +239,57 @@ describe(PublicSharesService.name, () => {
 
       const result = await service.streamMedia(token, 'aula.mp4', 'bytes=500-');
 
-      expect(result).toEqual({ kind: 'content', content: video });
+      expect(result).toEqual({
+        kind: 'content',
+        content: video,
+        partial: { contentRange: 'bytes 500-999/1000', contentLength: 500 },
+        contentLength: 500
+      });
       expect(driveProvider.downloadDriveFile).toHaveBeenCalledWith(
         connection,
         { providerFileId: 'aula.mp4', name: 'aula.mp4', mimeType: 'video/mp4', sizeBytes: 1000 },
         { range: 'bytes=500-' }
       );
+    });
+
+    it('serves the whole file without a range', async () => {
+      driveProvider.downloadDriveFile.mockResolvedValue(video);
+
+      await expect(service.streamMedia(token, 'aula.mp4')).resolves.toEqual({
+        kind: 'content',
+        content: video,
+        partial: null,
+        contentLength: 1000
+      });
+      expect(driveProvider.downloadDriveFile).toHaveBeenCalledWith(connection, expect.anything(), {});
+    });
+
+    it('shifts ranges by the start offset, reporting sizes as seen from it', async () => {
+      driveProvider.downloadDriveFile.mockResolvedValue(video);
+
+      const result = await service.streamMedia(token, 'aula.mp4', 'bytes=100-199', 600);
+
+      expect(driveProvider.downloadDriveFile).toHaveBeenCalledWith(connection, expect.anything(), { range: 'bytes=700-799' });
+      expect(result).toEqual(
+        expect.objectContaining({ partial: { contentRange: 'bytes 100-199/400', contentLength: 100 }, contentLength: 100 })
+      );
+
+      await service.streamMedia(token, 'aula.mp4', undefined, 600);
+      expect(driveProvider.downloadDriveFile).toHaveBeenLastCalledWith(connection, expect.anything(), { range: 'bytes=600-' });
+
+      await expect(service.streamMedia(token, 'aula.mp4', undefined, 1000)).resolves.toEqual({
+        kind: 'unsatisfiable',
+        sizeBytes: 1000
+      });
+    });
+
+    it('returns the video duration from Google Drive, and null when unavailable', async () => {
+      driveProvider.getVideoDurationMs.mockResolvedValueOnce(1567132).mockRejectedValueOnce(new Error('boom'));
+
+      await expect(service.getMediaInfo(token, 'aula.mp4')).resolves.toEqual({ durationMs: 1567132 });
+      await expect(service.getMediaInfo(token, 'aula.mp4')).resolves.toEqual({ durationMs: null });
+      await expect(service.getMediaInfo(token, 'foto.png')).resolves.toEqual({ durationMs: null });
+      await expect(service.getMediaInfo(token, 'segredo.pdf')).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('answers ranges past the end of the file without calling Google', async () => {

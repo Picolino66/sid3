@@ -20,6 +20,7 @@ import {
 import {
   PublicFolderCrumbDto,
   PublicFolderListResponseDto,
+  PublicMediaInfoDto,
   PublicSearchItemDto,
   PublicSearchResponseDto,
   PublicShareItemDto,
@@ -30,9 +31,17 @@ import { hashShareLinkToken, isWellFormedShareLinkToken } from './share-link-tok
 
 export type PublicZip = { credentials: StorageProviderIntegrationCredentials; plan: DriveZipPlan; zipName: string };
 
-/** Resultado de uma pré-visualização: o conteúdo, ou "intervalo fora do arquivo" (HTTP 416). */
+/**
+ * Resultado de uma pré-visualização: o conteúdo (inteiro ou parcial), ou "intervalo fora do arquivo" (HTTP 416).
+ * Tamanhos e intervalos já estão nas coordenadas do arquivo visto a partir de `startOffset`.
+ */
 export type PublicMediaResult =
-  | { kind: 'content'; content: DriveFileContent }
+  | {
+      kind: 'content';
+      content: DriveFileContent;
+      partial: { contentRange: string; contentLength: number | null } | null;
+      contentLength: number | null;
+    }
   | { kind: 'unsatisfiable'; sizeBytes: number };
 
 type PublicItemFields = Pick<
@@ -166,39 +175,89 @@ export class PublicSharesService {
   /**
    * Conteúdo de imagem, vídeo ou áudio para tocar no navegador. Repassa o header Range ao Google,
    * o que permite avançar o vídeo sem baixar tudo.
+   *
+   * `startOffset` faz o arquivo "começar" naquele byte (o Range é relativo a ele). O player de MPEG-TS
+   * usa isso para avançar: esse formato não tem índice, então ele recomeça a leitura perto do ponto pedido.
    */
-  async streamMedia(token: string, fileId: string, rangeHeader?: string): Promise<PublicMediaResult> {
+  async streamMedia(token: string, fileId: string, rangeHeader?: string, startOffset = 0): Promise<PublicMediaResult> {
     const share = await this.resolveShare(token);
-    const path = await this.resolveAccessiblePath(share, fileId);
-    const file = path[path.length - 1]!;
+    const file = await this.resolveMediaFile(share, fileId);
 
-    if (!publicPreviewKind(file.mimeType, file.isFolder)) {
-      throw new UnprocessableEntityException('Este item não pode ser visualizado no navegador; baixe o arquivo.');
+    const fileSize = file.sizeBytes === null ? null : Number(file.sizeBytes);
+    if (startOffset > 0 && (fileSize === null || startOffset >= fileSize)) {
+      return { kind: 'unsatisfiable', sizeBytes: fileSize ?? 0 };
     }
-
-    const sizeBytes = file.sizeBytes === null ? null : Number(file.sizeBytes);
-    const range = parseByteRange(rangeHeader, sizeBytes);
+    const visibleSize = fileSize === null ? null : fileSize - startOffset;
+    const range = parseByteRange(rangeHeader, visibleSize);
     if (range.kind === 'unsatisfiable') {
-      return { kind: 'unsatisfiable', sizeBytes: sizeBytes ?? 0 };
+      return { kind: 'unsatisfiable', sizeBytes: visibleSize ?? 0 };
     }
     // O player pede vários intervalos ao avançar; registra só o início da reprodução.
-    if (range.kind === 'full' || range.start === 0) {
+    if (startOffset === 0 && (range.kind === 'full' || range.start === 0)) {
       this.logger.log(`Public preview link=${share.id.slice(0, 8)} file=${file.providerFileId.slice(0, 8)}`);
     }
+
+    const googleRange =
+      range.kind === 'range'
+        ? `bytes=${startOffset + range.start}-${range.end === null ? '' : startOffset + range.end}`
+        : startOffset > 0
+          ? `bytes=${startOffset}-`
+          : undefined;
 
     try {
       const content = await this.driveProvider.downloadDriveFile(
         share.connection,
-        { providerFileId: file.providerFileId, name: file.name, mimeType: file.mimeType, sizeBytes },
-        range.kind === 'range' ? { range: range.header } : {}
+        { providerFileId: file.providerFileId, name: file.name, mimeType: file.mimeType, sizeBytes: fileSize },
+        googleRange ? { range: googleRange } : {}
       );
-      return { kind: 'content', content };
+
+      if (range.kind !== 'range') {
+        return { kind: 'content', content, partial: null, contentLength: visibleSize };
+      }
+      if (visibleSize === null) {
+        // Tamanho desconhecido (e sem deslocamento): repassa o intervalo informado pelo Google.
+        return { kind: 'content', content, partial: content.partial ?? null, contentLength: null };
+      }
+      const end = range.end ?? visibleSize - 1;
+      return {
+        kind: 'content',
+        content,
+        partial: { contentRange: `bytes ${range.start}-${end}/${visibleSize}`, contentLength: end - range.start + 1 },
+        contentLength: end - range.start + 1
+      };
     } catch (error) {
       this.logger.warn(
         `Public preview failed link=${share.id.slice(0, 8)} reason=${error instanceof Error ? error.message : 'unknown_error'}`
       );
       throw new BadGatewayException('Não foi possível obter este arquivo do Google Drive agora. Tente novamente mais tarde.');
     }
+  }
+
+  /** Duração do vídeo (do Google Drive), usada pelo player para mostrar a barra de tempo e avançar. */
+  async getMediaInfo(token: string, fileId: string): Promise<PublicMediaInfoDto> {
+    const share = await this.resolveShare(token);
+    const file = await this.resolveMediaFile(share, fileId);
+    if (publicPreviewKind(file.mimeType, file.isFolder) !== 'video') {
+      return { durationMs: null };
+    }
+
+    try {
+      return { durationMs: await this.driveProvider.getVideoDurationMs(share.connection, file.providerFileId) };
+    } catch (error) {
+      this.logger.warn(
+        `Public media info failed link=${share.id.slice(0, 8)} reason=${error instanceof Error ? error.message : 'unknown_error'}`
+      );
+      return { durationMs: null };
+    }
+  }
+
+  private async resolveMediaFile(share: ResolvedShare, fileId: string): Promise<DriveIndexEntry> {
+    const path = await this.resolveAccessiblePath(share, fileId);
+    const file = path[path.length - 1]!;
+    if (!publicPreviewKind(file.mimeType, file.isFolder)) {
+      throw new UnprocessableEntityException('Este item não pode ser visualizado no navegador; baixe o arquivo.');
+    }
+    return file;
   }
 
   /**

@@ -15,7 +15,11 @@ export function publicPreviewKind(mimeType: string, isFolder: boolean): PublicPr
   return null;
 }
 
-export type ParsedByteRange = { kind: 'full' } | { kind: 'range'; header: string; start: number } | { kind: 'unsatisfiable' };
+export type ParsedByteRange =
+  | { kind: 'full' }
+  /** Intervalo pedido; `end` nulo significa "até o fim do arquivo". */
+  | { kind: 'range'; start: number; end: number | null }
+  | { kind: 'unsatisfiable' };
 
 /**
  * Interpreta um header Range de intervalo único ("bytes=0-", "bytes=100-199", "bytes=-500").
@@ -28,14 +32,21 @@ export function parseByteRange(header: string | undefined, sizeBytes: number | n
   }
 
   const [, startText = '', endText = ''] = match;
-  if (startText !== '' && endText !== '' && Number(endText) < Number(startText)) {
+  if (startText === '') {
+    // Sufixo ("os últimos N bytes"): só dá para atender sabendo o tamanho.
+    if (sizeBytes === null) return { kind: 'full' };
+    const suffixLength = Number(endText);
+    if (suffixLength === 0) return { kind: 'unsatisfiable' };
+    return { kind: 'range', start: Math.max(0, sizeBytes - suffixLength), end: sizeBytes - 1 };
+  }
+
+  const start = Number(startText);
+  const end = endText === '' ? null : Number(endText);
+  if (end !== null && end < start) {
     return { kind: 'full' };
   }
-
-  const start = startText === '' ? Math.max(0, (sizeBytes ?? 0) - Number(endText)) : Number(startText);
-  if (sizeBytes !== null && (start >= sizeBytes || (startText === '' && Number(endText) === 0))) {
+  if (sizeBytes !== null && start >= sizeBytes) {
     return { kind: 'unsatisfiable' };
   }
-
-  return { kind: 'range', header: `bytes=${startText}-${endText}`, start };
+  return { kind: 'range', start, end: end === null || sizeBytes === null ? end : Math.min(end, sizeBytes - 1) };
 }

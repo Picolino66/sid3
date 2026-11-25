@@ -607,6 +607,22 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     }
   }
 
+  /** Duração do vídeo segundo o Google Drive (nula se o Drive ainda não processou o vídeo). */
+  async getVideoDurationMs(integration: StorageProviderIntegrationCredentials, providerFileId: string): Promise<number | null> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.files.get({
+        fileId: providerFileId,
+        supportsAllDrives: true,
+        fields: 'videoMediaMetadata(durationMillis)'
+      });
+      const duration = Number(response.data.videoMediaMetadata?.durationMillis);
+      return Number.isFinite(duration) && duration > 0 ? duration : null;
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive video metadata fetch failed');
+    }
+  }
+
   /** Os headers da resposta podem vir como objeto simples ou como Headers (fetch), conforme a versão do gaxios. */
   private readHeader(headers: unknown, name: string): string | null {
     if (!headers) {

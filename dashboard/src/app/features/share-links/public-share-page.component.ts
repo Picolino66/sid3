@@ -4,7 +4,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, OnIni
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { debounceTime, distinctUntilChanged, map, Subscription } from 'rxjs';
+import { debounceTime, distinctUntilChanged, firstValueFrom, map, Subscription } from 'rxjs';
 import { toApiErrorMessage } from '../../core/api/api-error';
 import { formatBytes } from '../drive/drive-file.presenter';
 import { PublicMediaViewerComponent } from './public-media-viewer.component';
@@ -180,6 +180,7 @@ const PREVIEW_ICONS: Record<string, string> = { image: '🖼️', video: '🎬',
         [startId]="startId"
         [contentUrl]="contentUrlFn"
         [downloadUrl]="downloadUrlFn"
+        [loadDurationMs]="loadDurationMsFn"
         (closed)="previewStartId.set(null)"
       />
     }
@@ -223,6 +224,8 @@ export class PublicSharePageComponent implements OnInit {
   protected readonly contentUrlFn = (item: PublicShareItem): string =>
     this.shareLinksService.publicContentUrl(this.token(), item.id);
   protected readonly downloadUrlFn = (item: PublicShareItem): string => this.downloadUrl(item);
+  protected readonly loadDurationMsFn = async (item: PublicShareItem): Promise<number | null> =>
+    (await firstValueFrom(this.shareLinksService.getPublicMediaInfo(this.token(), item.id))).durationMs;
 
   private folderSubscription: Subscription | null = null;
   private searchSubscription: Subscription | null = null;

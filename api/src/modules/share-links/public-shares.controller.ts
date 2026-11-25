@@ -19,9 +19,11 @@ import { streamZipResponse } from '../drive-index/zip-response';
 import { ListPublicFolderQueryDto } from './dto/list-public-folder-query.dto';
 import {
   PublicFolderListResponseDto,
+  PublicMediaInfoDto,
   PublicSearchResponseDto,
   PublicShareResponseDto
 } from './dto/public-share-response.dto';
+import { MediaContentQueryDto } from './dto/media-content-query.dto';
 import { SearchPublicShareQueryDto } from './dto/search-public-share-query.dto';
 import { PublicSharesService } from './public-shares.service';
 
@@ -70,6 +72,18 @@ export class PublicSharesController {
     return this.publicSharesService.search(token, query.q, query.page);
   }
 
+  @Get('files/:fileId/media-info')
+  @ApiOkResponse({ type: PublicMediaInfoDto })
+  @ApiUnprocessableEntityResponse({ description: 'Item is not an image, video or audio' })
+  getMediaInfo(
+    @Param('token') token: string,
+    @Param('fileId') fileId: string,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<PublicMediaInfoDto> {
+    this.setPrivacyHeaders(response);
+    return this.publicSharesService.getMediaInfo(token, fileId);
+  }
+
   @Get('files/:fileId/content')
   @ApiProduces('image/*', 'video/*', 'audio/*')
   @ApiHeader({ name: 'Range', required: false, description: 'Intervalo de bytes (ex.: bytes=0-), usado pelo player de vídeo' })
@@ -81,31 +95,34 @@ export class PublicSharesController {
     @Param('token') token: string,
     @Param('fileId') fileId: string,
     @Headers('range') range: string | undefined,
+    @Query() query: MediaContentQueryDto,
     @Res() response: Response
   ): Promise<void> {
-    const result = await this.publicSharesService.streamMedia(token, fileId, range);
+    const result = await this.publicSharesService.streamMedia(token, fileId, range, query.start ?? 0);
 
     this.setPrivacyHeaders(response);
     response.setHeader('Accept-Ranges', 'bytes');
+    // O player de MPEG-TS lê o arquivo por fetch (CORS) e precisa do Content-Range para saber o tamanho.
+    response.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
     if (result.kind === 'unsatisfiable') {
       response.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE).setHeader('Content-Range', `bytes */${result.sizeBytes}`);
       response.end();
       return;
     }
 
-    const { content } = result;
+    const { content, partial, contentLength } = result;
     response.setHeader('Content-Type', content.contentType);
     response.setHeader('Content-Disposition', buildInlineDisposition(content.fileName));
     response.setHeader('X-Content-Type-Options', 'nosniff');
     // Mídia nunca precisa de scripts: se o arquivo não for o que diz ser, o navegador não executa nada.
     response.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
-    if (content.partial) {
-      response.status(HttpStatus.PARTIAL_CONTENT).setHeader('Content-Range', content.partial.contentRange);
-      if (content.partial.contentLength !== null) {
-        response.setHeader('Content-Length', String(content.partial.contentLength));
+    if (partial) {
+      response.status(HttpStatus.PARTIAL_CONTENT).setHeader('Content-Range', partial.contentRange);
+      if (partial.contentLength !== null) {
+        response.setHeader('Content-Length', String(partial.contentLength));
       }
-    } else if (content.sizeBytes !== null) {
-      response.setHeader('Content-Length', String(content.sizeBytes));
+    } else if (contentLength !== null) {
+      response.setHeader('Content-Length', String(contentLength));
     }
 
     try {

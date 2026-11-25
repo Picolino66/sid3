@@ -41,7 +41,8 @@ Público (sem autenticação; o token é a credencial):
 | `GET` | `/public/shares/{token}/folders/{folderId}?page=` | Conteúdo de uma pasta dentro do link (100 por página) |
 | `GET` | `/public/shares/{token}/search?q=&page=` | Busca por nome em todos os itens do link e no conteúdo das pastas (50 por página, sem diferenciar acentos) |
 | `GET` | `/public/shares/{token}/files/{fileId}/download` | Download (Docs/Planilhas/Apresentações exportados para Office) |
-| `GET` | `/public/shares/{token}/files/{fileId}/content` | Imagem, vídeo ou áudio para exibir no navegador; aceita `Range` (`206`/`416`) para avançar o vídeo |
+| `GET` | `/public/shares/{token}/files/{fileId}/content?start=` | Imagem, vídeo ou áudio para exibir no navegador; aceita `Range` (`206`/`416`) para avançar o vídeo. `start` faz o arquivo "começar" naquele byte (o `Range` passa a ser relativo a ele) |
+| `GET` | `/public/shares/{token}/files/{fileId}/media-info` | Duração do vídeo segundo o Google Drive (`durationMs`, nula se indisponível) |
 | `GET` | `/public/shares/{token}/folders/{folderId}/download-zip` | ZIP de uma pasta do link, com subpastas |
 | `GET` | `/public/shares/{token}/download-zip` | ZIP com todos os itens do link |
 
@@ -50,7 +51,9 @@ Público (sem autenticação; o token é a credencial):
 - Cada item traz `previewKind` (`image`, `video`, `audio` ou nulo). A página abre um visualizador com navegação entre as mídias da lista (setas do teclado ou botões) e toca o vídeo em streaming pela rota `/content`.
 - `/content` só serve imagem (exceto SVG), vídeo e áudio, sempre com `Content-Disposition: inline`, `X-Content-Type-Options: nosniff` e `Content-Security-Policy: default-src 'none'; sandbox` — HTML, SVG e PDF não são exibidos inline para não executar conteúdo na origem da API.
 - O header `Range` é repassado ao Google; intervalos fora do arquivo respondem `416` sem consultar o Google.
-- O navegador só reproduz formatos que ele suporta (MP4/H.264, WebM, MP3...). Arquivos com outra codificação — por exemplo MPEG-TS salvo como `.mp4` — mostram a opção de baixar.
+- O navegador reproduz nativamente MP4/H.264, WebM, MP3 etc. Quando ele recusa um vídeo, a página tenta tocá-lo como **MPEG-TS** (comum em aulas baixadas de streaming e salvas como `.mp4`): o `mpegts.js` converte o fluxo para MP4 no navegador (Media Source Extensions). A biblioteca (~53 KB comprimida) só é baixada nesse caso.
+- MPEG-TS não tem índice, então o `mpegts.js` não avança para trechos não carregados. O player usa controles próprios: com a duração do Google Drive (`/media-info`), estima o byte do tempo pedido (taxa de bits constante, alinhado a pacotes de 188 bytes) e recomeça a conversão com `?start=`. A posição exibida é estimada; em vídeos de taxa variável pode ficar alguns segundos fora. Sem duração, o vídeo toca do início, sem barra de avanço.
+- Se nem a conversão funcionar, o visualizador oferece o download.
 - A busca monta a árvore no banco (CTE recursiva) a partir dos itens do link, então só encontra itens dentro deles. Cada resultado traz `path` (pastas até ele) e `parentId` para abrir a pasta onde está.
 
 ## Comportamento com o índice

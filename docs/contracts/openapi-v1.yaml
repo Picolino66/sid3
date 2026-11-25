@@ -634,6 +634,34 @@ paths:
           $ref: '#/components/responses/Gone'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/files/{fileId}/media-info:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Video duration reported by Google Drive (used by the player to seek MPEG-TS videos)
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - $ref: '#/components/parameters/DriveFileId'
+      responses:
+        '200':
+          description: Media info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [durationMs]
+                properties:
+                  durationMs:
+                    type: integer
+                    nullable: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /public/shares/{token}/files/{fileId}/content:
     get:
       tags: [Public Shares]
@@ -642,6 +670,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ShareToken'
         - $ref: '#/components/parameters/DriveFileId'
+        - name: start
+          in: query
+          required: false
+          description: Byte where the file "starts"; Range becomes relative to it (used to seek MPEG-TS videos)
+          schema:
+            type: integer
+            minimum: 0
         - name: Range
           in: header
           required: false

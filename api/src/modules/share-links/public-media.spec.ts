@@ -13,9 +13,11 @@ describe('public media rules', () => {
 
   it('parses single byte ranges and rejects ranges past the end of the file', () => {
     expect(parseByteRange(undefined, 100)).toEqual({ kind: 'full' });
-    expect(parseByteRange('bytes=0-', 100)).toEqual({ kind: 'range', header: 'bytes=0-', start: 0 });
-    expect(parseByteRange('bytes=10-19', 100)).toEqual({ kind: 'range', header: 'bytes=10-19', start: 10 });
-    expect(parseByteRange('bytes=-30', 100)).toEqual({ kind: 'range', header: 'bytes=-30', start: 70 });
+    expect(parseByteRange('bytes=0-', 100)).toEqual({ kind: 'range', start: 0, end: null });
+    expect(parseByteRange('bytes=10-19', 100)).toEqual({ kind: 'range', start: 10, end: 19 });
+    expect(parseByteRange('bytes=90-500', 100)).toEqual({ kind: 'range', start: 90, end: 99 });
+    expect(parseByteRange('bytes=-30', 100)).toEqual({ kind: 'range', start: 70, end: 99 });
+    expect(parseByteRange('bytes=-30', null)).toEqual({ kind: 'full' });
     expect(parseByteRange('bytes=100-', 100)).toEqual({ kind: 'unsatisfiable' });
     expect(parseByteRange('bytes=-0', 100)).toEqual({ kind: 'unsatisfiable' });
     // Formatos não suportados viram resposta completa.

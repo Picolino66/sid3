@@ -12,6 +12,7 @@
           "builder": "@angular/build:application",
           "options": {
             "outputPath": "dist/dashboard",
+            "allowedCommonJsDependencies": ["mpegts.js"],
             "index": "src/index.html",
             "browser": "src/main.ts",
             "polyfills": ["zone.js"],

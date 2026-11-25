@@ -37,6 +37,11 @@ export class PublicShareItemDto {
   previewKind!: 'image' | 'video' | 'audio' | null;
 }
 
+export class PublicMediaInfoDto {
+  @ApiProperty({ nullable: true, description: 'Duração do vídeo em milissegundos, segundo o Google Drive' })
+  durationMs!: number | null;
+}
+
 export class PublicSearchItemDto extends PublicShareItemDto {
   @ApiProperty({ type: [String], description: 'Pastas do item compartilhado até o item (sem o próprio item)' })
   path!: string[];

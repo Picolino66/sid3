@@ -41,6 +41,11 @@ export class ShareLinksService {
     });
   }
 
+  /** Duração do vídeo segundo o Google Drive (usada para avançar vídeos MPEG-TS). */
+  getPublicMediaInfo(token: string, fileId: string): Observable<{ durationMs: number | null }> {
+    return this.http.get<{ durationMs: number | null }>(`${this.publicUrl(token)}/files/${encodeURIComponent(fileId)}/media-info`);
+  }
+
   /** Endereço para exibir imagem/vídeo/áudio direto no navegador (com avanço do vídeo via Range). */
   publicContentUrl(token: string, fileId: string): string {
     return `${this.publicUrl(token)}/files/${encodeURIComponent(fileId)}/content`;
