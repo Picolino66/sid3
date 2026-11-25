@@ -21,5 +21,6 @@ module.exports = {
       statements: 80
     }
   },
+  maxWorkers: 1,
   testEnvironment: 'node'
 };

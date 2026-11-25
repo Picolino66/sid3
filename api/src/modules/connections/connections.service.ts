@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, Logger, NotFoundException, Unauthorize
 import { Provider, ProviderIntegrationStatus, Prisma, Sid3RootFolderStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
+import { DriveIndexSyncService } from '../drive-index/drive-index-sync.service';
+import { hasDriveFullReadScope } from '../drive-index/drive-index-scopes';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleDriveStorageProvider } from '../storage-providers/google-drive-storage.provider';
 import { StorageProviderRegistry } from '../storage-providers/storage-provider.registry';
@@ -33,7 +35,8 @@ export class ConnectionsService {
     private readonly prisma: PrismaService,
     private readonly googleOAuthClient: GoogleOAuthClient,
     private readonly tokenEncryptionService: TokenEncryptionService,
-    private readonly storageProviderRegistry: StorageProviderRegistry
+    private readonly storageProviderRegistry: StorageProviderRegistry,
+    private readonly driveIndexSyncService: DriveIndexSyncService
   ) {}
 
   async createGoogleAuthorizationUrl(userId: string): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
@@ -129,6 +132,8 @@ export class ConnectionsService {
           `Connected Google Drive connection=${this.maskId(connection.id)} user=${this.maskId(userId)} scopes=${connection.scopes.join(',')}`
         );
       }
+
+      await this.scheduleInitialIndexing(userId, connection, oauthState.connectionId ? 'incremental' : 'full');
 
       return this.toConnectionResponse(connection);
     } catch (error) {
@@ -262,6 +267,25 @@ export class ConnectionsService {
     );
 
     return this.toConnectionResponse(updated);
+  }
+
+  /** Ao conectar (ou reconectar) uma conta com escopo de leitura, já dispara a indexação do Drive. */
+  private async scheduleInitialIndexing(
+    userId: string,
+    connection: PersistedConnection,
+    mode: 'incremental' | 'full'
+  ): Promise<void> {
+    if (!hasDriveFullReadScope(connection.scopes)) {
+      return;
+    }
+
+    try {
+      await this.driveIndexSyncService.requestRefresh(userId, connection.id, mode);
+    } catch (error) {
+      this.logger.warn(
+        `Could not schedule drive indexing for connection=${this.maskId(connection.id)} reason=${this.sanitizeError(error)}`
+      );
+    }
   }
 
   private async logOAuthStateDiagnostics(userId: string, state: string): Promise<void> {

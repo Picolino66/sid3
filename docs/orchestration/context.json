@@ -782,6 +782,34 @@
         "summary": "Refined Google Drive upload organization so each bucket is resolved inside the sid3 root folder for its selected connection; legacy folder caches are invalidated by migration without moving files or object metadata.",
         "status": "IN_PROGRESS",
         "artifact": "api/src/modules/objects/objects.service.ts"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-09-25",
+        "summary": "Implemented technical improvements from melhorias.md: test serial execution config with maxWorkers=1, Google Drive quota TTL cache with force bypass, HMAC SHA-256 signed download URLs, orphan temp files and stuck objects reconciliation service, dashboard upload progress bar, global toast notification service, proactive pending confirmation banner, media preview modal, and synchronized OpenAPI v1 specification (27 paths, 30 schemas).",
+        "status": "COMPLETED",
+        "artifact": "melhorias.md"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-11-24",
+        "summary": "Added Google Drive index covering My Drive, shared-with-me items and every shared drive the user is a member of: full scan on connect plus on-demand incremental refresh via Changes API, stored in drive_index_entries; JWT endpoints to get index status, refresh, list/search folders, read metadata and download (Google Docs exported to Office). Default OAuth scopes now drive.file + drive.readonly; granted scopes are persisted. Dashboard 'Meu Drive' page with refresh, folder navigation, search, preview and download.",
+        "status": "COMPLETED",
+        "artifact": "docs/modules/drive-index/index.md"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-11-24",
+        "summary": "Added public share links: owner selects N files/folders/shared drives in 'Meu Drive' and creates a link (optional name and expiration); 'Links compartilhados' page lists, copies and revokes links; anonymous page /s/:token lists items, navigates shared folders and downloads. Token stored as sha256 + encrypted copy; every public read walks the index ancestors to ensure the item belongs to the link.",
+        "status": "COMPLETED",
+        "artifact": "docs/modules/share-links/index.md"
+      },
+      {
+        "phase": "F5",
+        "timestamp": "2026-11-24",
+        "summary": "Added folder download as ZIP (owner 'Meu Drive' and public share links, plus 'download all' of a link): plan built from the Drive index, files streamed one at a time from Google into an archiver ZIP, safe/unique names, Google Docs exported, skipped items listed in a notice file, limits SID3_ZIP_MAX_FILES/SID3_ZIP_MAX_MB, stops on client disconnect.",
+        "status": "COMPLETED",
+        "artifact": "docs/modules/drive-index/zip-download.md"
       }
     ]
   },

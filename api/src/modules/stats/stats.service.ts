@@ -5,14 +5,32 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConnectionStatsResponseDto } from './dto/connection-stats-response.dto';
 import { ProjectStorageStatsResponseDto } from './dto/project-storage-stats-response.dto';
 
+interface DriveQuotaData {
+  limitBytes: string | null;
+  usageBytes: string;
+  usageInDriveBytes: string;
+}
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
 @Injectable()
 export class StatsService {
+  private readonly quotaCache = new Map<string, CacheEntry<DriveQuotaData | null>>();
+  private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly driveProvider: GoogleDriveStorageProvider
   ) {}
 
-  async getProjectStorageStats(userId: string, projectId: string): Promise<ProjectStorageStatsResponseDto> {
+  clearQuotaCache(): void {
+    this.quotaCache.clear();
+  }
+
+  async getProjectStorageStats(userId: string, projectId: string, force = false): Promise<ProjectStorageStatsResponseDto> {
     await this.ensureProjectOwner(userId, projectId);
 
     const [byBucketRaw, byResolvedIntegrationRaw, buckets, connections] = await Promise.all([
@@ -85,17 +103,21 @@ export class StatsService {
         if (!conn || conn.status !== 'CONNECTED') {
           return { connectionId, quota: null };
         }
-        const quota = await this.driveProvider.getDriveQuota({
-          provider: conn.provider,
-          encryptedAccessToken: conn.encryptedAccessToken,
-          encryptedRefreshToken: conn.encryptedRefreshToken,
-          tokenExpiresAt: conn.tokenExpiresAt
-        });
+        const quota = await this.getCachedDriveQuota(
+          connectionId,
+          {
+            provider: conn.provider,
+            encryptedAccessToken: conn.encryptedAccessToken,
+            encryptedRefreshToken: conn.encryptedRefreshToken,
+            tokenExpiresAt: conn.tokenExpiresAt
+          },
+          force
+        );
         return { connectionId, quota };
       })
     );
 
-    const quotaMap = new Map<string, { limitBytes: string | null; usageBytes: string; usageInDriveBytes: string } | null>();
+    const quotaMap = new Map<string, DriveQuotaData | null>();
     for (const result of quotaResults) {
       if (result.status === 'fulfilled') {
         quotaMap.set(result.value.connectionId, result.value.quota);
@@ -130,7 +152,7 @@ export class StatsService {
     };
   }
 
-  async getConnectionStats(userId: string, connectionId: string): Promise<ConnectionStatsResponseDto> {
+  async getConnectionStats(userId: string, connectionId: string, force = false): Promise<ConnectionStatsResponseDto> {
     const connection = await this.prisma.providerIntegration.findFirst({
       where: { id: connectionId, userId },
       select: {
@@ -173,14 +195,18 @@ export class StatsService {
       (byResolved._sum.sizeBytes ?? BigInt(0)) + (byDirectBuckets._sum.sizeBytes ?? BigInt(0));
     const totalCount = byResolved._count.id + byDirectBuckets._count.id;
 
-    let quota: { limitBytes: string | null; usageBytes: string; usageInDriveBytes: string } | null = null;
+    let quota: DriveQuotaData | null = null;
     if (connection.status === 'CONNECTED') {
-      quota = await this.driveProvider.getDriveQuota({
-        provider: connection.provider,
-        encryptedAccessToken: connection.encryptedAccessToken,
-        encryptedRefreshToken: connection.encryptedRefreshToken,
-        tokenExpiresAt: connection.tokenExpiresAt
-      }).catch(() => null);
+      quota = await this.getCachedDriveQuota(
+        connectionId,
+        {
+          provider: connection.provider,
+          encryptedAccessToken: connection.encryptedAccessToken,
+          encryptedRefreshToken: connection.encryptedRefreshToken,
+          tokenExpiresAt: connection.tokenExpiresAt
+        },
+        force
+      );
     }
 
     return {
@@ -199,7 +225,8 @@ export class StatsService {
 
   async getProjectConnectionsStats(
     userId: string,
-    projectId: string
+    projectId: string,
+    force = false
   ): Promise<ConnectionStatsResponseDto[]> {
     await this.ensureProjectOwner(userId, projectId);
 
@@ -210,8 +237,33 @@ export class StatsService {
     });
 
     return Promise.all(
-      connections.map((c) => this.getConnectionStats(userId, c.id))
+      connections.map((c) => this.getConnectionStats(userId, c.id, force))
     );
+  }
+
+  private async getCachedDriveQuota(
+    connectionId: string,
+    credentials: {
+      provider: any;
+      encryptedAccessToken: string;
+      encryptedRefreshToken: string | null;
+      tokenExpiresAt: Date | null;
+    },
+    force = false
+  ): Promise<DriveQuotaData | null> {
+    const cached = this.quotaCache.get(connectionId);
+    const now = Date.now();
+    if (!force && cached && cached.expiresAt > now) {
+      return cached.data;
+    }
+
+    try {
+      const quota = await this.driveProvider.getDriveQuota(credentials);
+      this.quotaCache.set(connectionId, { data: quota, expiresAt: now + this.CACHE_TTL_MS });
+      return quota;
+    } catch {
+      return null;
+    }
   }
 
   private async ensureProjectOwner(userId: string, projectId: string): Promise<void> {

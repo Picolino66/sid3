@@ -10,11 +10,51 @@ import {
   DeleteObjectInput,
   DownloadObjectInput,
   DownloadObjectResult,
+  DriveChange,
+  DriveChangesPage,
+  DriveFileContent,
+  DriveFilesPage,
+  DriveIndexedFile,
+  DriveSharedDrivesPage,
   StorageProviderIntegrationCredentials,
   StorageProviderPort,
   UploadObjectInput,
   UploadObjectResult
 } from './dto/storage-provider.types';
+
+export const DRIVE_FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
+const DRIVE_FILE_FIELDS = 'id,name,mimeType,size,parents,driveId,md5Checksum,modifiedTime,webViewLink,trashed,ownedByMe';
+const SHARED_DRIVES_PAGE_SIZE = 100;
+const DRIVE_LIST_PAGE_SIZE = 1000;
+
+/** Formato de exportação para arquivos nativos do Google (Docs, Planilhas, Apresentações, Desenhos). */
+export const GOOGLE_WORKSPACE_EXPORT_FORMATS: Record<string, { mimeType: string; extension: string }> = {
+  'application/vnd.google-apps.document': {
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    extension: 'docx'
+  },
+  'application/vnd.google-apps.spreadsheet': {
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    extension: 'xlsx'
+  },
+  'application/vnd.google-apps.presentation': {
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    extension: 'pptx'
+  },
+  'application/vnd.google-apps.drawing': { mimeType: 'image/png', extension: 'png' }
+};
+
+export function isDriveFolderMimeType(mimeType: string): boolean {
+  return mimeType === DRIVE_FOLDER_MIME_TYPE;
+}
+
+/** Arquivo é baixável se tiver conteúdo binário ou se for um formato nativo do Google exportável. */
+export function isDriveFileDownloadable(mimeType: string): boolean {
+  if (!mimeType.startsWith('application/vnd.google-apps.')) {
+    return true;
+  }
+  return mimeType in GOOGLE_WORKSPACE_EXPORT_FORMATS;
+}
 
 @Injectable()
 export class GoogleDriveStorageProvider implements StorageProviderPort {
@@ -357,6 +397,258 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     }
   }
 
+  async getRootFolderId(integration: StorageProviderIntegrationCredentials): Promise<string> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.files.get({ fileId: 'root', fields: 'id' });
+      if (!response.data.id) {
+        throw new BadGatewayException('Google Drive did not return the root folder id');
+      }
+      return response.data.id;
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive root folder lookup failed');
+    }
+  }
+
+  async getChangesStartPageToken(integration: StorageProviderIntegrationCredentials): Promise<string> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.changes.getStartPageToken({ supportsAllDrives: true });
+      if (!response.data.startPageToken) {
+        throw new BadGatewayException('Google Drive did not return a changes start page token');
+      }
+      return response.data.startPageToken;
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive changes token fetch failed');
+    }
+  }
+
+  /**
+   * Lista uma página de arquivos não excluídos. Sem driveId: "Meu Drive" e "Compartilhados comigo";
+   * com driveId: o conteúdo daquele drive compartilhado.
+   */
+  async listFilesPage(
+    integration: StorageProviderIntegrationCredentials,
+    pageToken?: string | null,
+    driveId?: string
+  ): Promise<DriveFilesPage> {
+    const drive = this.createDriveClient(integration);
+    const corpusParams = driveId
+      ? { corpora: 'drive', driveId, includeItemsFromAllDrives: true }
+      : // Inclui itens de drives compartilhados que foram compartilhados diretamente com o usuário,
+        // mesmo sem ele ser membro do drive (esses drives não aparecem em drives.list).
+        { corpora: 'user', includeItemsFromAllDrives: true };
+
+    try {
+      const response = await drive.files.list({
+        q: 'trashed = false',
+        spaces: 'drive',
+        ...corpusParams,
+        supportsAllDrives: true,
+        pageSize: DRIVE_LIST_PAGE_SIZE,
+        pageToken: pageToken ?? undefined,
+        fields: `nextPageToken,files(${DRIVE_FILE_FIELDS})`
+      });
+
+      return {
+        files: (response.data.files ?? []).flatMap((file) => this.toIndexedFile(file) ?? []),
+        nextPageToken: response.data.nextPageToken ?? null
+      };
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive file listing failed');
+    }
+  }
+
+  /**
+   * Lista o conteúdo direto de uma pasta. Necessário para pastas compartilhadas comigo: o corpus "user"
+   * só traz arquivos meus, abertos por mim ou compartilhados diretamente comigo, então o conteúdo de uma
+   * pasta de outra pessoa só aparece consultando pelo pai. Uma pasta por consulta: com várias pastas
+   * unidas por "or", o Google devolve só os itens que já estão no corpus do usuário.
+   */
+  async listFolderChildrenPage(
+    integration: StorageProviderIntegrationCredentials,
+    folderId: string,
+    pageToken?: string | null
+  ): Promise<DriveFilesPage> {
+    const drive = this.createDriveClient(integration);
+    const escapedId = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    try {
+      const response = await drive.files.list({
+        q: `'${escapedId}' in parents and trashed = false`,
+        spaces: 'drive',
+        corpora: 'allDrives',
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true,
+        pageSize: DRIVE_LIST_PAGE_SIZE,
+        pageToken: pageToken ?? undefined,
+        fields: `nextPageToken,files(${DRIVE_FILE_FIELDS})`
+      });
+
+      return {
+        files: (response.data.files ?? []).flatMap((file) => this.toIndexedFile(file) ?? []),
+        nextPageToken: response.data.nextPageToken ?? null
+      };
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive folder listing failed');
+    }
+  }
+
+  /** Lista os drives compartilhados dos quais o usuário é membro. */
+  async listSharedDrivesPage(
+    integration: StorageProviderIntegrationCredentials,
+    pageToken?: string | null
+  ): Promise<DriveSharedDrivesPage> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.drives.list({
+        pageSize: SHARED_DRIVES_PAGE_SIZE,
+        pageToken: pageToken ?? undefined,
+        fields: 'nextPageToken,drives(id,name)'
+      });
+
+      return {
+        drives: (response.data.drives ?? []).flatMap((sharedDrive) =>
+          sharedDrive.id ? [{ driveId: sharedDrive.id, name: sharedDrive.name ?? '(drive sem nome)' }] : []
+        ),
+        nextPageToken: response.data.nextPageToken ?? null
+      };
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive shared drives listing failed');
+    }
+  }
+
+  async listChangesPage(
+    integration: StorageProviderIntegrationCredentials,
+    pageToken: string
+  ): Promise<DriveChangesPage> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.changes.list({
+        pageToken,
+        spaces: 'drive',
+        includeRemoved: true,
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true,
+        pageSize: DRIVE_LIST_PAGE_SIZE,
+        fields: `nextPageToken,newStartPageToken,changes(changeType,fileId,driveId,removed,drive(id,name),file(${DRIVE_FILE_FIELDS}))`
+      });
+
+      return {
+        changes: (response.data.changes ?? []).flatMap((change): DriveChange[] => {
+          if (change.changeType === 'drive') {
+            if (!change.driveId) {
+              return [];
+            }
+            const sharedDrive = change.drive?.id
+              ? { driveId: change.drive.id, name: change.drive.name ?? '(drive sem nome)' }
+              : null;
+            return [
+              { kind: 'drive', driveId: change.driveId, removed: change.removed === true || !sharedDrive, drive: sharedDrive }
+            ];
+          }
+          if (!change.fileId) {
+            return [];
+          }
+          const file = change.file ? this.toIndexedFile(change.file) : null;
+          return [{ kind: 'file', providerFileId: change.fileId, removed: change.removed === true || file === null, file }];
+        }),
+        nextPageToken: response.data.nextPageToken ?? null,
+        newStartPageToken: response.data.newStartPageToken ?? null
+      };
+    } catch (error) {
+      if (this.isInvalidPageTokenError(error)) {
+        throw new DriveChangesTokenExpiredError();
+      }
+      throw this.mapProviderError(error, 'Google Drive changes listing failed');
+    }
+  }
+
+  /** Baixa o conteúdo de um arquivo; formatos nativos do Google são exportados para Office/PNG. */
+  async downloadDriveFile(
+    integration: StorageProviderIntegrationCredentials,
+    file: { providerFileId: string; name: string; mimeType: string; sizeBytes: number | null },
+    options: { range?: string } = {}
+  ): Promise<DriveFileContent> {
+    const drive = this.createDriveClient(integration);
+    const exportFormat = GOOGLE_WORKSPACE_EXPORT_FORMATS[file.mimeType];
+
+    try {
+      if (exportFormat) {
+        const exported = await drive.files.export(
+          { fileId: file.providerFileId, mimeType: exportFormat.mimeType },
+          { responseType: 'stream' }
+        );
+        return {
+          stream: exported.data as Readable,
+          contentType: exportFormat.mimeType,
+          fileName: this.withExtension(file.name, exportFormat.extension),
+          sizeBytes: null
+        };
+      }
+
+      const media = await drive.files.get(
+        { fileId: file.providerFileId, alt: 'media', acknowledgeAbuse: false, supportsAllDrives: true },
+        { responseType: 'stream', ...(options.range ? { headers: { Range: options.range } } : {}) }
+      );
+      const contentRange = this.readHeader(media.headers, 'content-range');
+      const contentLength = Number(this.readHeader(media.headers, 'content-length'));
+      return {
+        stream: media.data as Readable,
+        contentType: file.mimeType || 'application/octet-stream',
+        fileName: file.name,
+        sizeBytes: file.sizeBytes,
+        ...(media.status === 206 && contentRange
+          ? { partial: { contentRange, contentLength: Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null } }
+          : {})
+      };
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive file download failed');
+    }
+  }
+
+  /** Os headers da resposta podem vir como objeto simples ou como Headers (fetch), conforme a versão do gaxios. */
+  private readHeader(headers: unknown, name: string): string | null {
+    if (!headers) {
+      return null;
+    }
+    if (typeof (headers as Headers).get === 'function') {
+      return (headers as Headers).get(name);
+    }
+    const value = (headers as Record<string, unknown>)[name];
+    return typeof value === 'string' ? value : null;
+  }
+
+  private toIndexedFile(file: drive_v3.Schema$File): DriveIndexedFile | null {
+    if (!file.id || file.trashed === true) {
+      return null;
+    }
+
+    return {
+      providerFileId: file.id,
+      parentFileId: file.parents?.[0] ?? null,
+      driveId: file.driveId ?? null,
+      name: file.name ?? '(sem nome)',
+      mimeType: file.mimeType ?? 'application/octet-stream',
+      sizeBytes: file.size ? BigInt(file.size) : null,
+      md5Checksum: file.md5Checksum ?? null,
+      modifiedTime: file.modifiedTime ? new Date(file.modifiedTime) : null,
+      webViewLink: file.webViewLink ?? null,
+      ownedByMe: typeof file.ownedByMe === 'boolean' ? file.ownedByMe : null
+    };
+  }
+
+  private withExtension(name: string, extension: string): string {
+    return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
+  }
+
+  private isInvalidPageTokenError(error: unknown): boolean {
+    const status = (error as { response?: { status?: number } })?.response?.status
+      ?? Number((error as { code?: number | string })?.code);
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    return (status === 400 || status === 410) && message.includes('token');
+  }
+
   private createDriveClient(integration: StorageProviderIntegrationCredentials): drive_v3.Drive {
     return google.drive({
       version: 'v3',
@@ -402,5 +694,13 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     }
 
     return new BadGatewayException(fallbackMessage);
+  }
+}
+
+/** O token da Changes API expirou ou é inválido; é preciso refazer a varredura completa. */
+export class DriveChangesTokenExpiredError extends Error {
+  constructor() {
+    super('Google Drive changes page token is no longer valid');
+    this.name = 'DriveChangesTokenExpiredError';
   }
 }

@@ -12,7 +12,8 @@
     "start": "ng serve --host localhost --port 4200",
     "lint": "ng build --configuration development",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "test": "echo \"dashboard tests not implemented yet\""
+    "test": "../api/node_modules/.bin/tsx --test src/app/core/notifications/notification.service.spec.ts src/app/features/drive/drive-file.presenter.spec.ts",
+    "test:serial": "../api/node_modules/.bin/tsx --test"
   },
   "dependencies": {
     "@angular/common": "21.2.12",

@@ -3,6 +3,8 @@
 ## Módulos
 
 - [Provedor de armazenamento](modules/storage-providers/index.md): integração e organização dos arquivos no Google Drive.
+- [Links de compartilhamento público](modules/share-links/index.md): seleção de itens do Drive e página pública para qualquer pessoa ver e baixar.
+- [Índice do Google Drive](modules/drive-index/index.md): varredura, atualização incremental, listagem e download de todo o Drive conectado.
 
 ## Arquitetura e rastreabilidade
 

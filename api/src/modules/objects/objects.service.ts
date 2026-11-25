@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { OperationStatus, OperationType, Prisma, Provider, Sid3RootFolderStatus, StorageObjectStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
@@ -13,6 +13,8 @@ import { StorageProviderIntegrationCredentials } from '../storage-providers/dto/
 import { ObjectListResponseDto } from './dto/object-list-response.dto';
 import { StorageObjectResponseDto } from './dto/storage-object-response.dto';
 import { UploadObjectRequestDto } from './dto/upload-object-request.dto';
+import { SignedDownloadUrlResponseDto } from './dto/signed-download-url-response.dto';
+import { SignedUrlService } from './signed-url.service';
 
 type ListObjectsQuery = {
   prefix?: string;
@@ -69,8 +71,13 @@ export class ObjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageProviderRegistry: StorageProviderRegistry,
-    private readonly poolRoutingFactory: PoolRoutingFactory
-  ) {}
+    private readonly poolRoutingFactory: PoolRoutingFactory,
+    @Optional() private signedUrlService?: SignedUrlService
+  ) {
+    if (!this.signedUrlService) {
+      this.signedUrlService = new SignedUrlService();
+    }
+  }
 
   async listObjects(
     apiKey: ApiKeyAuthContext,
@@ -193,6 +200,23 @@ export class ObjectsService {
 
     await this.logOperation(apiKey, bucketId, objectId, OperationType.DOWNLOAD, OperationStatus.SUCCESS);
     return download;
+  }
+
+  async signDownloadUrl(
+    apiKey: ApiKeyAuthContext,
+    bucketId: string,
+    objectId: string,
+    expiresInSeconds?: number
+  ): Promise<SignedDownloadUrlResponseDto> {
+    await this.getAuthorizedBucket(apiKey.projectId, bucketId);
+    await this.getAvailableObject(apiKey.projectId, bucketId, objectId);
+
+    return this.signedUrlService!.generateSignedDownloadToken(
+      bucketId,
+      objectId,
+      apiKey.projectId,
+      expiresInSeconds
+    );
   }
 
   async deleteObject(apiKey: ApiKeyAuthContext, bucketId: string, objectId: string): Promise<void> {

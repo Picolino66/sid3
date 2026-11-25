@@ -1,8 +1,9 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse
 } from '@nestjs/swagger';
@@ -23,31 +24,37 @@ export class StatsController {
   @Get('projects/:projectId/stats/storage')
   @ApiOkResponse({ type: ProjectStorageStatsResponseDto })
   @ApiUnauthorizedResponse()
+  @ApiQuery({ name: 'force', required: false, type: Boolean, description: 'Atualizar cota contornando o cache' })
   getProjectStorageStats(
     @CurrentUserContext() user: CurrentUser,
-    @Param('projectId') projectId: string
+    @Param('projectId') projectId: string,
+    @Query('force') force?: string
   ): Promise<ProjectStorageStatsResponseDto> {
-    return this.statsService.getProjectStorageStats(user.id, projectId);
+    return this.statsService.getProjectStorageStats(user.id, projectId, force === 'true');
   }
 
   @Get('connections/:connectionId/stats')
   @ApiOkResponse({ type: ConnectionStatsResponseDto })
   @ApiNotFoundResponse()
   @ApiUnauthorizedResponse()
+  @ApiQuery({ name: 'force', required: false, type: Boolean, description: 'Atualizar cota contornando o cache' })
   getConnectionStats(
     @CurrentUserContext() user: CurrentUser,
-    @Param('connectionId') connectionId: string
+    @Param('connectionId') connectionId: string,
+    @Query('force') force?: string
   ): Promise<ConnectionStatsResponseDto> {
-    return this.statsService.getConnectionStats(user.id, connectionId);
+    return this.statsService.getConnectionStats(user.id, connectionId, force === 'true');
   }
 
   @Get('projects/:projectId/stats/connections')
   @ApiOkResponse({ type: ConnectionStatsResponseDto, isArray: true })
   @ApiUnauthorizedResponse()
+  @ApiQuery({ name: 'force', required: false, type: Boolean, description: 'Atualizar cota contornando o cache' })
   getProjectConnectionsStats(
     @CurrentUserContext() user: CurrentUser,
-    @Param('projectId') projectId: string
+    @Param('projectId') projectId: string,
+    @Query('force') force?: string
   ): Promise<ConnectionStatsResponseDto[]> {
-    return this.statsService.getProjectConnectionsStats(user.id, projectId);
+    return this.statsService.getProjectConnectionsStats(user.id, projectId, force === 'true');
   }
 }

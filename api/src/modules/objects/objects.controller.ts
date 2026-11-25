@@ -30,6 +30,7 @@ import type { Response } from 'express';
 import { CurrentApiKey } from '../../common/auth/current-api-key.decorator';
 import { ApiKeyAuthContext, ApiKeyAuthGuard } from '../../common/auth/api-key-auth.guard';
 import { ObjectListResponseDto } from './dto/object-list-response.dto';
+import { SignedDownloadUrlResponseDto } from './dto/signed-download-url-response.dto';
 import { StorageObjectResponseDto } from './dto/storage-object-response.dto';
 import { UploadObjectRequestDto } from './dto/upload-object-request.dto';
 import { ObjectsService } from './objects.service';
@@ -128,5 +129,18 @@ export class ObjectsController {
     @Param('objectId') objectId: string
   ): Promise<void> {
     await this.objectsService.deleteObject(apiKey, bucketId, objectId);
+  }
+
+  @Post(':objectId/sign-download')
+  @ApiOkResponse({ type: SignedDownloadUrlResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Invalid or missing API key' })
+  signDownloadUrl(
+    @CurrentApiKey() apiKey: ApiKeyAuthContext,
+    @Param('bucketId') bucketId: string,
+    @Param('objectId') objectId: string,
+    @Query('expiresIn') expiresIn?: string
+  ): Promise<SignedDownloadUrlResponseDto> {
+    const parsedExpiresIn = expiresIn ? parseInt(expiresIn, 10) : undefined;
+    return this.objectsService.signDownloadUrl(apiKey, bucketId, objectId, parsedExpiresIn);
   }
 }

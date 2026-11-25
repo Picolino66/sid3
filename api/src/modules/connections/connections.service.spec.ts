@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Provider, ProviderIntegrationStatus, Sid3RootFolderStatus } from '@prisma/client';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
+import { DriveIndexSyncService } from '../drive-index/drive-index-sync.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderRegistry } from '../storage-providers/storage-provider.registry';
 import { GoogleOAuthClient } from './google-oauth.client';
@@ -43,6 +44,7 @@ describe(ConnectionsService.name, () => {
   let googleOAuthClient: jest.Mocked<Pick<GoogleOAuthClient, 'createAuthorizationUrl' | 'exchangeCode'>>;
   let tokenEncryptionService: jest.Mocked<Pick<TokenEncryptionService, 'encrypt' | 'decrypt'>>;
   let storageProviderRegistry: jest.Mocked<Pick<StorageProviderRegistry, 'getProvider'>>;
+  let driveIndexSyncService: jest.Mocked<Pick<DriveIndexSyncService, 'requestRefresh'>>;
   let service: ConnectionsService;
 
   beforeEach(() => {
@@ -71,6 +73,9 @@ describe(ConnectionsService.name, () => {
     storageProviderRegistry = {
       getProvider: jest.fn()
     };
+    driveIndexSyncService = {
+      requestRefresh: jest.fn().mockResolvedValue(undefined)
+    };
 
     const transaction = jest.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
@@ -90,7 +95,8 @@ describe(ConnectionsService.name, () => {
       prisma,
       googleOAuthClient as unknown as GoogleOAuthClient,
       tokenEncryptionService as unknown as TokenEncryptionService,
-      storageProviderRegistry as unknown as StorageProviderRegistry
+      storageProviderRegistry as unknown as StorageProviderRegistry,
+      driveIndexSyncService as unknown as DriveIndexSyncService
     );
   });
 
@@ -172,6 +178,58 @@ describe(ConnectionsService.name, () => {
     expect(providerIntegrationDelegate.create).toHaveBeenCalledTimes(1);
     expect(providerIntegrationDelegate.findFirst).not.toHaveBeenCalled();
     expect(providerIntegrationDelegate.update).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule drive indexing when the connection only has drive.file scope', async () => {
+    oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id' });
+    googleOAuthClient.exchangeCode.mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiryDate: null,
+      scopes: ['https://www.googleapis.com/auth/drive.file']
+    });
+    providerIntegrationDelegate.create.mockResolvedValue(persistedConnection);
+
+    await service.completeGoogleConnection(userId, { code: 'google-code', state: 'state-value-with-enough-length-1' });
+
+    expect(driveIndexSyncService.requestRefresh).not.toHaveBeenCalled();
+  });
+
+  it('schedules a full drive indexing right after a new connection with drive.readonly scope', async () => {
+    const readScopes = ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive.readonly'];
+    oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id' });
+    googleOAuthClient.exchangeCode.mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiryDate: null,
+      scopes: readScopes
+    });
+    providerIntegrationDelegate.create.mockResolvedValue({ ...persistedConnection, scopes: readScopes });
+
+    await service.completeGoogleConnection(userId, { code: 'google-code', state: 'state-value-with-enough-length-1' });
+
+    expect(driveIndexSyncService.requestRefresh).toHaveBeenCalledWith(userId, persistedConnection.id, 'full');
+  });
+
+  it('schedules an incremental indexing on reauthorization and ignores scheduling failures', async () => {
+    const readScopes = ['https://www.googleapis.com/auth/drive.readonly'];
+    oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id', connectionId: persistedConnection.id });
+    googleOAuthClient.exchangeCode.mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: null,
+      expiryDate: null,
+      scopes: readScopes
+    });
+    providerIntegrationDelegate.update.mockResolvedValue({ ...persistedConnection, scopes: readScopes });
+    driveIndexSyncService.requestRefresh.mockRejectedValue(new Error('db down'));
+
+    const response = await service.completeGoogleConnection(userId, {
+      code: 'google-code',
+      state: 'state-value-with-enough-length-1'
+    });
+
+    expect(driveIndexSyncService.requestRefresh).toHaveBeenCalledWith(userId, persistedConnection.id, 'incremental');
+    expect(response.id).toBe(persistedConnection.id);
   });
 
   it('rejects callback when OAuth state is invalid or expired', async () => {

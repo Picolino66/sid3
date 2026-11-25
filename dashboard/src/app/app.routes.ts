@@ -16,6 +16,13 @@ export const routes: Routes = [
     loadComponent: () => import('./features/auth/register-page.component').then((m) => m.RegisterPageComponent)
   },
   {
+    // Página pública de um link compartilhado: sem login e sem o layout do dashboard.
+    path: 's/:token',
+    title: 'Arquivos compartilhados',
+    loadComponent: () =>
+      import('./features/share-links/public-share-page.component').then((m) => m.PublicSharePageComponent)
+  },
+  {
     path: '',
     canActivate: [authGuard],
     loadComponent: () => import('./layout/dashboard-shell.component').then((m) => m.DashboardShellComponent),
@@ -28,6 +35,15 @@ export const routes: Routes = [
         path: 'connections',
         loadComponent: () =>
           import('./features/connections/connections-page.component').then((m) => m.ConnectionsPageComponent)
+      },
+      {
+        path: 'drive',
+        loadComponent: () => import('./features/drive/drive-page.component').then((m) => m.DrivePageComponent)
+      },
+      {
+        path: 'share-links',
+        loadComponent: () =>
+          import('./features/share-links/share-links-page.component').then((m) => m.ShareLinksPageComponent)
       },
       {
         path: 'connections/google/callback',

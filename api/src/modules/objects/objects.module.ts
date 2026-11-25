@@ -9,6 +9,8 @@ import { StorageProvidersModule } from '../storage-providers/storage-providers.m
 import { StoragePoolsModule } from '../storage-pools/storage-pools.module';
 import { ObjectsController } from './objects.controller';
 import { ObjectsService } from './objects.service';
+import { ReconciliationService } from './reconciliation.service';
+import { SignedUrlService } from './signed-url.service';
 import { UploadCleanupInterceptor } from './upload-cleanup.interceptor';
 import { UploadProblemDetailsFilter } from './upload-problem-details.filter';
 
@@ -26,7 +28,7 @@ import { UploadProblemDetailsFilter } from './upload-problem-details.filter';
     })
   ],
   controllers: [ObjectsController],
-  providers: [ApiKeyAuthGuard, ObjectsService, UploadCleanupInterceptor, UploadProblemDetailsFilter],
-  exports: [ObjectsService]
+  providers: [ApiKeyAuthGuard, ObjectsService, SignedUrlService, ReconciliationService, UploadCleanupInterceptor, UploadProblemDetailsFilter],
+  exports: [ObjectsService, SignedUrlService, ReconciliationService]
 })
 export class ObjectsModule {}

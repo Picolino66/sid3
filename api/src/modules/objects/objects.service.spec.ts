@@ -705,6 +705,24 @@ describe(ObjectsService.name, () => {
       expect(prisma.storageObject.create).not.toHaveBeenCalled();
     });
   });
+
+  describe('signDownloadUrl', () => {
+    it('generates a signed download URL for an available object', async () => {
+      prisma.storageObject.findFirst.mockResolvedValue(persistedObject({ id: 'obj-123' }));
+
+      const result = await service.signDownloadUrl(apiKey, bucketId, 'obj-123', 900);
+
+      expect(result.token).toBeDefined();
+      expect(result.url).toContain(`/buckets/${bucketId}/objects/obj-123/download?token=`);
+      expect(result.expiresInSeconds).toBe(900);
+    });
+
+    it('rejects signDownloadUrl when object is not found', async () => {
+      prisma.storageObject.findFirst.mockResolvedValue(null);
+
+      await expect(service.signDownloadUrl(apiKey, bucketId, 'missing-obj')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });
 
 function persistedObject(overrides: Partial<{ id: string; key: string; providerFileId: string }>) {

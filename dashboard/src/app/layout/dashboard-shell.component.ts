@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
+import { NotificationService } from '../core/notifications/notification.service';
 
 @Component({
   selector: 'sid3-dashboard-shell',
@@ -18,6 +19,8 @@ import { AuthService } from '../core/auth/auth.service';
         <nav>
           <a routerLink="/projects" routerLinkActive="active">Projetos</a>
           <a routerLink="/connections" routerLinkActive="active">Conexões</a>
+          <a routerLink="/drive" routerLinkActive="active">Meu Drive</a>
+          <a routerLink="/share-links" routerLinkActive="active">Links compartilhados</a>
           <a routerLink="/buckets" routerLinkActive="active">Buckets</a>
           <a routerLink="/api-keys" routerLinkActive="active">Chaves de API</a>
           <a routerLink="/files" routerLinkActive="active">Arquivos</a>
@@ -34,12 +37,24 @@ import { AuthService } from '../core/auth/auth.service';
       <section class="content">
         <router-outlet />
       </section>
+
+      @if (notificationService.notifications().length > 0) {
+        <aside class="toast-container" aria-live="polite">
+          @for (toast of notificationService.notifications(); track toast.id) {
+            <div [class]="'toast toast--' + toast.type" role="alert">
+              <span>{{ toast.message }}</span>
+              <button class="toast-close" type="button" (click)="notificationService.dismiss(toast.id)" aria-label="Fechar notificação">×</button>
+            </div>
+          }
+        </aside>
+      }
     </main>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class DashboardShellComponent {
   protected readonly authService = inject(AuthService);
+  protected readonly notificationService = inject(NotificationService);
   private readonly router = inject(Router);
 
   logout(): void {

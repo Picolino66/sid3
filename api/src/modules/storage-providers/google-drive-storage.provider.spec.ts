@@ -3,12 +3,20 @@ import { ConfigService } from '@nestjs/config';
 import { Provider } from '@prisma/client';
 import { Readable } from 'stream';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
-import { GoogleDriveStorageProvider } from './google-drive-storage.provider';
+import {
+  DriveChangesTokenExpiredError,
+  GoogleDriveStorageProvider,
+  isDriveFileDownloadable
+} from './google-drive-storage.provider';
 
 const driveCreate = jest.fn();
 const driveGet = jest.fn();
 const driveDelete = jest.fn();
 const driveList = jest.fn();
+const driveExport = jest.fn();
+const changesList = jest.fn();
+const changesGetStartPageToken = jest.fn();
+const drivesList = jest.fn();
 const setCredentials = jest.fn();
 const oauthRequest = jest.fn();
 
@@ -19,7 +27,15 @@ jest.mock('googleapis', () => ({
         create: driveCreate,
         get: driveGet,
         delete: driveDelete,
-        list: driveList
+        list: driveList,
+        export: driveExport
+      },
+      changes: {
+        list: changesList,
+        getStartPageToken: changesGetStartPageToken
+      },
+      drives: {
+        list: drivesList
       }
     }))
   }
@@ -421,6 +437,201 @@ describe(GoogleDriveStorageProvider.name, () => {
 
       await expect(provider.findOrCreateFolder('fotos', integration)).rejects.toBeInstanceOf(BadGatewayException);
       expect(driveCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('drive indexing', () => {
+    it('lists a page of files mapping metadata and skipping trashed items', async () => {
+      driveList.mockResolvedValue({
+        data: {
+          nextPageToken: 'next',
+          files: [
+            {
+              id: 'f1',
+              name: 'a.pdf',
+              mimeType: 'application/pdf',
+              size: '10',
+              parents: ['root-id'],
+              modifiedTime: '2026-11-01T10:00:00.000Z'
+            },
+            { id: 'f2', name: 'lixo.txt', mimeType: 'text/plain', trashed: true },
+            { name: 'sem-id' }
+          ]
+        }
+      });
+
+      const page = await provider.listFilesPage(integration, 'token-1');
+
+      expect(driveList).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'trashed = false', pageToken: 'token-1', corpora: 'user', includeItemsFromAllDrives: true })
+      );
+      expect(page.nextPageToken).toBe('next');
+      expect(page.files).toEqual([
+        {
+          providerFileId: 'f1',
+          parentFileId: 'root-id',
+          driveId: null,
+          name: 'a.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 10n,
+          md5Checksum: null,
+          modifiedTime: new Date('2026-11-01T10:00:00.000Z'),
+          webViewLink: null,
+          ownedByMe: null
+        }
+      ]);
+    });
+
+    it('lists the contents of a folder by parent, including folders shared with me', async () => {
+      driveList.mockResolvedValue({
+        data: {
+          files: [{ id: 'c1', name: 'aula.mp4', mimeType: 'video/mp4', parents: ['pasta-a'], ownedByMe: false }]
+        }
+      });
+
+      const page = await provider.listFolderChildrenPage(integration, "pasta'a", null);
+
+      expect(driveList).toHaveBeenCalledWith(
+        expect.objectContaining({
+          q: "'pasta\\'a' in parents and trashed = false",
+          corpora: 'allDrives',
+          includeItemsFromAllDrives: true,
+          supportsAllDrives: true
+        })
+      );
+      expect(page.files).toEqual([expect.objectContaining({ providerFileId: 'c1', parentFileId: 'pasta-a', ownedByMe: false })]);
+      expect(page.nextPageToken).toBeNull();
+    });
+
+    it('maps changes, treating trashed files as removed', async () => {
+      changesList.mockResolvedValue({
+        data: {
+          newStartPageToken: 'new-token',
+          changes: [
+            { fileId: 'a', removed: true },
+            { fileId: 'b', file: { id: 'b', name: 'b.txt', mimeType: 'text/plain', trashed: true } },
+            { fileId: 'c', file: { id: 'c', name: 'c.txt', mimeType: 'text/plain' } },
+            { removed: true }
+          ]
+        }
+      });
+
+      const page = await provider.listChangesPage(integration, 'start');
+
+      expect(page.newStartPageToken).toBe('new-token');
+      expect(page.nextPageToken).toBeNull();
+      expect(page.changes.map((change) => [change.kind === 'file' ? change.providerFileId : null, change.removed])).toEqual([
+        ['a', true],
+        ['b', true],
+        ['c', false]
+      ]);
+      expect(changesList).toHaveBeenCalledWith(
+        expect.objectContaining({ includeItemsFromAllDrives: true, supportsAllDrives: true })
+      );
+    });
+
+    it('maps shared drive level changes', async () => {
+      changesList.mockResolvedValue({
+        data: {
+          newStartPageToken: 't',
+          changes: [
+            { changeType: 'drive', driveId: 'd1', drive: { id: 'd1', name: 'Equipe' } },
+            { changeType: 'drive', driveId: 'd2', removed: true },
+            { changeType: 'drive' }
+          ]
+        }
+      });
+
+      const page = await provider.listChangesPage(integration, 'start');
+
+      expect(page.changes).toEqual([
+        { kind: 'drive', driveId: 'd1', removed: false, drive: { driveId: 'd1', name: 'Equipe' } },
+        { kind: 'drive', driveId: 'd2', removed: true, drive: null }
+      ]);
+    });
+
+    it('lists shared drives and the files of one shared drive', async () => {
+      drivesList.mockResolvedValue({ data: { nextPageToken: 'n', drives: [{ id: 'd1', name: 'Equipe' }, { name: 'sem id' }] } });
+      driveList.mockResolvedValue({
+        data: { files: [{ id: 'f', name: 'x.txt', mimeType: 'text/plain', parents: ['d1'], driveId: 'd1' }] }
+      });
+
+      await expect(provider.listSharedDrivesPage(integration)).resolves.toEqual({
+        drives: [{ driveId: 'd1', name: 'Equipe' }],
+        nextPageToken: 'n'
+      });
+
+      const page = await provider.listFilesPage(integration, null, 'd1');
+      expect(driveList).toHaveBeenCalledWith(
+        expect.objectContaining({ corpora: 'drive', driveId: 'd1', includeItemsFromAllDrives: true, supportsAllDrives: true })
+      );
+      expect(page.files[0]).toEqual(expect.objectContaining({ providerFileId: 'f', parentFileId: 'd1', driveId: 'd1' }));
+    });
+
+    it('signals an expired changes token so the caller can run a full scan', async () => {
+      changesList.mockRejectedValue(Object.assign(new Error('Invalid page token'), { code: 400 }));
+
+      await expect(provider.listChangesPage(integration, 'old')).rejects.toBeInstanceOf(DriveChangesTokenExpiredError);
+    });
+
+    it('returns the changes start token and root folder id', async () => {
+      changesGetStartPageToken.mockResolvedValue({ data: { startPageToken: '42' } });
+      driveGet.mockResolvedValue({ data: { id: 'root-id' } });
+
+      await expect(provider.getChangesStartPageToken(integration)).resolves.toBe('42');
+      await expect(provider.getRootFolderId(integration)).resolves.toBe('root-id');
+      expect(driveGet).toHaveBeenCalledWith({ fileId: 'root', fields: 'id' });
+    });
+
+    it('exports Google Docs to docx when downloading', async () => {
+      const stream = Readable.from(['docx']);
+      driveExport.mockResolvedValue({ data: stream });
+
+      const content = await provider.downloadDriveFile(integration, {
+        providerFileId: 'doc-1',
+        name: 'Contrato',
+        mimeType: 'application/vnd.google-apps.document',
+        sizeBytes: null
+      });
+
+      expect(driveExport).toHaveBeenCalledWith(
+        { fileId: 'doc-1', mimeType: expect.stringContaining('wordprocessingml') },
+        { responseType: 'stream' }
+      );
+      expect(content.fileName).toBe('Contrato.docx');
+      expect(content.stream).toBe(stream);
+    });
+
+    it('streams binary files with their own content type', async () => {
+      const stream = Readable.from(['pdf']);
+      driveGet.mockResolvedValue({ data: stream });
+
+      const content = await provider.downloadDriveFile(integration, {
+        providerFileId: 'pdf-1',
+        name: 'a.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 3
+      });
+
+      expect(driveGet).toHaveBeenCalledWith(
+        expect.objectContaining({ fileId: 'pdf-1', alt: 'media', supportsAllDrives: true }),
+        { responseType: 'stream' }
+      );
+      expect(content).toEqual({ stream, contentType: 'application/pdf', fileName: 'a.pdf', sizeBytes: 3 });
+    });
+
+    it('wraps download failures as bad gateway', async () => {
+      driveGet.mockRejectedValue(new Error('quota'));
+
+      await expect(
+        provider.downloadDriveFile(integration, { providerFileId: 'x', name: 'x', mimeType: 'text/plain', sizeBytes: 1 })
+      ).rejects.toBeInstanceOf(BadGatewayException);
+    });
+
+    it('knows which mime types are downloadable', () => {
+      expect(isDriveFileDownloadable('application/pdf')).toBe(true);
+      expect(isDriveFileDownloadable('application/vnd.google-apps.spreadsheet')).toBe(true);
+      expect(isDriveFileDownloadable('application/vnd.google-apps.form')).toBe(false);
     });
   });
 });

@@ -1,4 +1,4 @@
-import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
+import { HttpClient, HttpEvent, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { SID3_API_BASE_URL } from '../../core/api/api.config';
@@ -24,6 +24,39 @@ export class ObjectsService {
     return this.http.post<StorageObject>(`${this.apiBaseUrl}/buckets/${bucketId}/objects`, body, {
       headers: this.apiKeyHeaders(apiKeySecret)
     });
+  }
+
+  uploadObjectWithProgress(
+    bucketId: string,
+    apiKeySecret: string,
+    key: string,
+    file: File
+  ): Observable<HttpEvent<StorageObject>> {
+    const body = new FormData();
+    body.append('key', key);
+    body.append('file', file);
+
+    return this.http.post<StorageObject>(`${this.apiBaseUrl}/buckets/${bucketId}/objects`, body, {
+      headers: this.apiKeyHeaders(apiKeySecret),
+      reportProgress: true,
+      observe: 'events'
+    });
+  }
+
+  signDownloadUrl(
+    bucketId: string,
+    objectId: string,
+    apiKeySecret: string,
+    expiresIn?: number
+  ): Observable<{ url: string; token: string; expiresAt: string; expiresInSeconds: number }> {
+    return this.http.post<{ url: string; token: string; expiresAt: string; expiresInSeconds: number }>(
+      `${this.apiBaseUrl}/buckets/${bucketId}/objects/${objectId}/sign-download`,
+      {},
+      {
+        headers: this.apiKeyHeaders(apiKeySecret),
+        params: expiresIn ? { expiresIn: String(expiresIn) } : {}
+      }
+    );
   }
 
   downloadObject(bucketId: string, objectId: string, apiKeySecret: string): Observable<HttpResponse<Blob>> {

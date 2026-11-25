@@ -53,6 +53,13 @@ enum Sid3RootFolderStatus {
   CONFIRMED
 }
 
+enum DriveIndexStatus {
+  NEVER_INDEXED
+  INDEXING
+  READY
+  FAILED
+}
+
 model User {
   id                   String                @id @default(uuid()) @db.Uuid
   email                String                @unique
@@ -63,6 +70,7 @@ model User {
   storageObjects       StorageObject[]
   operationLogs        OperationLog[]
   oauthStates          OAuthState[]
+  shareLinks           ShareLink[]
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
 
@@ -70,9 +78,9 @@ model User {
 }
 
 model Project {
-  id             String        @id @default(uuid()) @db.Uuid
-  ownerUserId    String        @map("owner_user_id") @db.Uuid
-  owner          User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  id             String          @id @default(uuid()) @db.Uuid
+  ownerUserId    String          @map("owner_user_id") @db.Uuid
+  owner          User            @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
   name           String
   slug           String
   apiKeys        ApiKey[]
@@ -80,8 +88,8 @@ model Project {
   storagePools   StoragePool[]
   storageObjects StorageObject[]
   operationLogs  OperationLog[]
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
   @@unique([ownerUserId, slug])
   @@map("projects")
@@ -104,41 +112,110 @@ model ApiKey {
 }
 
 model ProviderIntegration {
-  id                    String                    @id @default(uuid()) @db.Uuid
-  userId                String                    @map("user_id") @db.Uuid
-  user                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider              Provider
-  displayName           String?                   @map("display_name")
-  providerAccountEmail  String?                   @map("provider_account_email")
-  encryptedAccessToken  String                    @map("encrypted_access_token")
-  encryptedRefreshToken String?                   @map("encrypted_refresh_token")
-  tokenExpiresAt        DateTime?                 @map("token_expires_at")
-  scopes                String[]
-  status                ProviderIntegrationStatus @default(CONNECTED)
-  revokedAt             DateTime?                 @map("revoked_at")
-  sid3RootFolderRef     String?                   @map("sid3_root_folder_ref")
-  sid3RootFolderStatus  Sid3RootFolderStatus      @default(NOT_RESOLVED) @map("sid3_root_folder_status")
-  buckets               Bucket[]
-  poolMemberships       StoragePoolMember[]
-  resolvedObjects       StorageObject[]           @relation("ResolvedIntegration")
-  bucketFolderRefs      BucketFolderRef[]
-  createdAt             DateTime                  @default(now()) @map("created_at")
-  updatedAt             DateTime                  @updatedAt @map("updated_at")
+  id                     String                    @id @default(uuid()) @db.Uuid
+  userId                 String                    @map("user_id") @db.Uuid
+  user                   User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider               Provider
+  displayName            String?                   @map("display_name")
+  providerAccountEmail   String?                   @map("provider_account_email")
+  encryptedAccessToken   String                    @map("encrypted_access_token")
+  encryptedRefreshToken  String?                   @map("encrypted_refresh_token")
+  tokenExpiresAt         DateTime?                 @map("token_expires_at")
+  scopes                 String[]
+  status                 ProviderIntegrationStatus @default(CONNECTED)
+  revokedAt              DateTime?                 @map("revoked_at")
+  sid3RootFolderRef      String?                   @map("sid3_root_folder_ref")
+  sid3RootFolderStatus   Sid3RootFolderStatus      @default(NOT_RESOLVED) @map("sid3_root_folder_status")
+  driveIndexStatus       DriveIndexStatus          @default(NEVER_INDEXED) @map("drive_index_status")
+  driveIndexStartedAt    DateTime?                 @map("drive_index_started_at")
+  driveIndexedAt         DateTime?                 @map("drive_indexed_at")
+  driveIndexChangesToken String?                   @map("drive_index_changes_token")
+  driveIndexRootFolderId String?                   @map("drive_index_root_folder_id")
+  driveIndexItemCount    Int                       @default(0) @map("drive_index_item_count")
+  driveIndexLastError    String?                   @map("drive_index_last_error")
+  driveIndexEntries      DriveIndexEntry[]
+  buckets                Bucket[]
+  poolMemberships        StoragePoolMember[]
+  resolvedObjects        StorageObject[]           @relation("ResolvedIntegration")
+  bucketFolderRefs       BucketFolderRef[]
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @updatedAt @map("updated_at")
+  shareLinks             ShareLink[]
 
   @@index([userId, provider])
   @@map("provider_integrations")
 }
 
+model DriveIndexEntry {
+  id                    String              @id @default(uuid()) @db.Uuid
+  providerIntegrationId String              @map("provider_integration_id") @db.Uuid
+  providerIntegration   ProviderIntegration @relation(fields: [providerIntegrationId], references: [id], onDelete: Cascade)
+  providerFileId        String              @map("provider_file_id")
+  parentFileId          String?             @map("parent_file_id")
+  driveId               String?             @map("drive_id")
+  isSharedDrive         Boolean             @default(false) @map("is_shared_drive")
+  name                  String
+  mimeType              String              @map("mime_type")
+  isFolder              Boolean             @default(false) @map("is_folder")
+  sizeBytes             BigInt?             @map("size_bytes")
+  md5Checksum           String?             @map("md5_checksum")
+  modifiedTime          DateTime?           @map("modified_time")
+  webViewLink           String?             @map("web_view_link")
+  /// Falso para itens de outras pessoas (compartilhados comigo); nulo em drives compartilhados.
+  ownedByMe             Boolean?            @map("owned_by_me")
+  indexedAt             DateTime            @map("indexed_at")
+
+  @@unique([providerIntegrationId, providerFileId])
+  @@index([providerIntegrationId, parentFileId])
+  @@index([providerIntegrationId, indexedAt])
+  @@index([providerIntegrationId, driveId])
+  @@map("drive_index_entries")
+}
+
+/// Link público que dá acesso de leitura a itens escolhidos do índice do Drive de uma conexão.
+model ShareLink {
+  id                    String              @id @default(uuid()) @db.Uuid
+  ownerUserId           String              @map("owner_user_id") @db.Uuid
+  owner                 User                @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  providerIntegrationId String              @map("provider_integration_id") @db.Uuid
+  providerIntegration   ProviderIntegration @relation(fields: [providerIntegrationId], references: [id], onDelete: Cascade)
+  name                  String?
+  tokenHash             String              @unique @map("token_hash")
+  encryptedToken        String              @map("encrypted_token")
+  expiresAt             DateTime?           @map("expires_at")
+  revokedAt             DateTime?           @map("revoked_at")
+  accessCount           Int                 @default(0) @map("access_count")
+  lastAccessedAt        DateTime?           @map("last_accessed_at")
+  items                 ShareLinkItem[]
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  @@index([ownerUserId, createdAt])
+  @@index([providerIntegrationId])
+  @@map("share_links")
+}
+
+model ShareLinkItem {
+  id             String    @id @default(uuid()) @db.Uuid
+  shareLinkId    String    @map("share_link_id") @db.Uuid
+  shareLink      ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+  providerFileId String    @map("provider_file_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([shareLinkId, providerFileId])
+  @@map("share_link_items")
+}
+
 model StoragePool {
-  id        String               @id @default(uuid()) @db.Uuid
-  projectId String               @map("project_id") @db.Uuid
-  project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id        String              @id @default(uuid()) @db.Uuid
+  projectId String              @map("project_id") @db.Uuid
+  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name      String
-  strategy  PoolRoutingStrategy  @default(ROUND_ROBIN)
+  strategy  PoolRoutingStrategy @default(ROUND_ROBIN)
   members   StoragePoolMember[]
   buckets   Bucket[]
-  createdAt DateTime             @default(now()) @map("created_at")
-  updatedAt DateTime             @updatedAt @map("updated_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
 
   @@unique([projectId, name])
   @@map("storage_pools")

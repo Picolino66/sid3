@@ -62,6 +62,48 @@ describe(ApiKeyAuthGuard.name, () => {
 
     await expect(guard.canActivate(createContext(request))).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('authenticates via signed URL token query parameter', async () => {
+    const signedUrlService = {
+      verifySignedDownloadToken: jest.fn().mockReturnValue({ projectId: 'project-from-token' })
+    };
+    const guardWithSigned = new ApiKeyAuthGuard(
+      prisma as unknown as PrismaService,
+      { extractPrefix: jest.fn(), hash: jest.fn() } as unknown as ApiKeySecretService,
+      signedUrlService as any
+    );
+
+    const tokenRequest = {
+      header: jest.fn().mockReturnValue(undefined),
+      query: { token: 'valid-token' },
+      params: { bucketId: 'b1', objectId: 'o1' }
+    } as unknown as ApiKeyAuthenticatedRequest;
+
+    await expect(guardWithSigned.canActivate(createContext(tokenRequest))).resolves.toBe(true);
+    expect(tokenRequest.apiKeyAuth).toEqual({
+      apiKeyId: 'signed-url',
+      projectId: 'project-from-token'
+    });
+  });
+
+  it('rejects invalid signed URL token', async () => {
+    const signedUrlService = {
+      verifySignedDownloadToken: jest.fn().mockReturnValue(null)
+    };
+    const guardWithSigned = new ApiKeyAuthGuard(
+      prisma as unknown as PrismaService,
+      { extractPrefix: jest.fn(), hash: jest.fn() } as unknown as ApiKeySecretService,
+      signedUrlService as any
+    );
+
+    const tokenRequest = {
+      header: jest.fn().mockReturnValue(undefined),
+      query: { token: 'bad-token' },
+      params: { bucketId: 'b1', objectId: 'o1' }
+    } as unknown as ApiKeyAuthenticatedRequest;
+
+    await expect(guardWithSigned.canActivate(createContext(tokenRequest))).rejects.toBeInstanceOf(UnauthorizedException);
+  });
 });
 
 function createContext(request: ApiKeyAuthenticatedRequest): ExecutionContext {

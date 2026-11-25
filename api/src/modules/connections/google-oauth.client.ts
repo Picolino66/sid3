@@ -9,6 +9,12 @@ export type GoogleTokenResult = {
   scopes: string[];
 };
 
+/** drive.file para gravar na pasta sid3; drive.readonly para indexar e baixar o Drive inteiro. */
+export const DEFAULT_GOOGLE_DRIVE_SCOPES = [
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.readonly'
+];
+
 @Injectable()
 export class GoogleOAuthClient {
   constructor(private readonly configService: ConfigService) {}
@@ -37,7 +43,8 @@ export class GoogleOAuthClient {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token ?? null,
       expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      scopes: this.getScopes()
+      // O Google permite que o usuário desmarque escopos na tela de consentimento: guardar o que foi concedido.
+      scopes: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean) : this.getScopes()
     };
   }
 
@@ -51,7 +58,7 @@ export class GoogleOAuthClient {
 
   private getScopes(): string[] {
     const configuredScopes = this.configService.get<string>('GOOGLE_DRIVE_SCOPES');
-    return configuredScopes?.split(/\s+/).filter(Boolean) ?? ['https://www.googleapis.com/auth/drive.file'];
+    return configuredScopes?.split(/\s+/).filter(Boolean) ?? DEFAULT_GOOGLE_DRIVE_SCOPES;
   }
 
   private getRequiredConfig(key: string): string {

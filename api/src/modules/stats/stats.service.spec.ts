@@ -226,4 +226,29 @@ describe(StatsService.name, () => {
     providerIntegrationDelegate.findFirst.mockResolvedValue(null);
     await expect(service.getConnectionStats(userId, connectionId)).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('uses cached drive quota within TTL and bypasses cache when force=true', async () => {
+    providerIntegrationDelegate.findFirst.mockResolvedValue({
+      id: connectionId,
+      provider: Provider.GOOGLE_DRIVE,
+      displayName: null,
+      providerAccountEmail: null,
+      status: ProviderIntegrationStatus.CONNECTED,
+      ...connTokenFields
+    });
+    storageObjectDelegate.aggregate
+      .mockResolvedValue({ _sum: { sizeBytes: BigInt(0) }, _count: { id: 0 } });
+
+    // Primeira chamada: busca remoto
+    await service.getConnectionStats(userId, connectionId);
+    expect(driveProvider.getDriveQuota).toHaveBeenCalledTimes(1);
+
+    // Segunda chamada sem force: deve usar cache sem chamar o provider novamente
+    await service.getConnectionStats(userId, connectionId);
+    expect(driveProvider.getDriveQuota).toHaveBeenCalledTimes(1);
+
+    // Terceira chamada com force=true: deve chamar o provider novamente
+    await service.getConnectionStats(userId, connectionId, true);
+    expect(driveProvider.getDriveQuota).toHaveBeenCalledTimes(2);
+  });
 });

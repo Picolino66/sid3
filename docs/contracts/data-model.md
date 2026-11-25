@@ -49,7 +49,54 @@
 - `scopes`: string array or normalized scope table
 - `status`: `CONNECTED`, `REVOKED`, `ERROR`
 - `revoked_at`: optional
+- `drive_index_status`: `NEVER_INDEXED`, `INDEXING`, `READY`, `FAILED` (default `NEVER_INDEXED`)
+- `drive_index_started_at`: optional; start of the run in progress (lock age)
+- `drive_indexed_at`: optional; end of the last successful run
+- `drive_index_changes_token`: optional; Google Drive Changes API page token for incremental refresh
+- `drive_index_root_folder_id`: optional; Google Drive id of "My Drive" root
+- `drive_index_item_count`: integer, default 0
+- `drive_index_last_error`: optional
 - `created_at`, `updated_at`
+
+### DriveIndexEntry
+
+Local index of every non-trashed item visible in a connected Google Drive (see `docs/modules/drive-index/index.md`).
+
+- `id`: UUID primary key
+- `provider_integration_id`: FK -> ProviderIntegration (cascade delete)
+- `provider_file_id`: Google Drive file id; unique per `provider_integration_id`
+- `parent_file_id`: optional; first parent in Google Drive (null for shared items without a visible parent and for shared drive entries)
+- `drive_id`: optional; shared drive that contains the item (null for My Drive)
+- `is_shared_drive`: boolean; the entry is the shared drive itself (`provider_file_id = drive_id`)
+- `name`, `mime_type`: required
+- `is_folder`: boolean
+- `size_bytes`: optional BigInt (null for folders and native Google files)
+- `md5_checksum`, `modified_time`, `web_view_link`: optional
+- `owned_by_me`: optional boolean — `false` for items owned by someone else (their folders are crawled by parent); null for shared-drive items
+- `indexed_at`: last time the item was seen by a scan or change; used to drop stale entries after a full scan
+- Indexes: (`provider_integration_id`, `parent_file_id`), (`provider_integration_id`, `indexed_at`), (`provider_integration_id`, `drive_id`)
+
+### ShareLink
+
+Public read-only link to chosen items of a connection's Drive index (see `docs/modules/share-links/index.md`).
+
+- `id`: UUID primary key
+- `owner_user_id`: FK -> User (cascade delete)
+- `provider_integration_id`: FK -> ProviderIntegration (cascade delete)
+- `name`: optional
+- `token_hash`: sha256 of the secret token; unique
+- `encrypted_token`: token encrypted with `TOKEN_ENCRYPTION_KEY` so the owner can copy the link again
+- `expires_at`, `revoked_at`: optional
+- `access_count`: integer, default 0; `last_accessed_at`: optional
+- `created_at`, `updated_at`
+- Indexes: (`owner_user_id`, `created_at`), (`provider_integration_id`)
+
+### ShareLinkItem
+
+- `id`: UUID primary key
+- `share_link_id`: FK -> ShareLink (cascade delete)
+- `provider_file_id`: Google Drive id of a file, folder or shared drive; unique per `share_link_id`
+- `created_at`
 
 ### StoragePool
 

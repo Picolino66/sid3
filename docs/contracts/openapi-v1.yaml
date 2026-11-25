@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: SID3 API
   version: 1.0.0
-  description: Drive-backed storage gateway API for SID3 MVP.
+  description: Drive-backed storage gateway API for SID3.
 servers:
   - url: /api/v1
 security:
@@ -10,11 +10,16 @@ security:
 tags:
   - name: Auth
   - name: Projects
-  - name: Integrations
+  - name: Connections
   - name: API Keys
   - name: Buckets
+  - name: Storage Pools
   - name: Objects
+  - name: Stats
   - name: Logs
+  - name: Drive Index
+  - name: Share Links
+  - name: Public Shares
 paths:
   /auth/register:
     post:
@@ -59,7 +64,7 @@ paths:
   /me:
     get:
       tags: [Auth]
-      summary: Return current user
+      summary: Get current authenticated user
       responses:
         '200':
           description: Current user
@@ -67,10 +72,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /projects:
     get:
       tags: [Projects]
-      summary: List projects owned by the current user
+      summary: List user projects
       responses:
         '200':
           description: Projects
@@ -91,14 +98,14 @@ paths:
               $ref: '#/components/schemas/CreateProjectRequest'
       responses:
         '201':
-          description: Created project
+          description: Project created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
-  /integrations/google/authorize:
+  /connections/google/authorize:
     post:
-      tags: [Integrations]
+      tags: [Connections]
       summary: Create a Google OAuth authorization URL
       responses:
         '200':
@@ -107,9 +114,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OAuthAuthorizeResponse'
-  /integrations/google/callback:
+  /connections/google/callback:
     post:
-      tags: [Integrations]
+      tags: [Connections]
       summary: Complete Google OAuth connection
       requestBody:
         required: true
@@ -124,25 +131,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProviderIntegration'
-  /integrations:
+  /connections:
     get:
-      tags: [Integrations]
-      summary: List provider integrations
+      tags: [Connections]
+      summary: List provider integrations / connections
       responses:
         '200':
-          description: Integrations
+          description: Connections
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProviderIntegration'
-  /integrations/{integrationId}/revoke:
+  /connections/{connectionId}:
+    patch:
+      tags: [Connections]
+      summary: Update connection display name
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConnectionRequest'
+      responses:
+        '200':
+          description: Updated connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderIntegration'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/revoke:
     post:
-      tags: [Integrations]
+      tags: [Connections]
       summary: Revoke a provider integration
       parameters:
-        - $ref: '#/components/parameters/IntegrationId'
+        - $ref: '#/components/parameters/ConnectionId'
       responses:
         '200':
           description: Revoked integration
@@ -150,6 +178,540 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProviderIntegration'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/reauthorize:
+    post:
+      tags: [Connections]
+      summary: Reauthorize an existing Google Drive connection via OAuth
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+      responses:
+        '200':
+          description: Reauthorization URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthAuthorizeResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/sid3-root/confirm:
+    post:
+      tags: [Connections]
+      summary: Confirm or decline reuse of pre-existing sid3 root folder in Google Drive
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmSid3RootFolderRequest'
+      responses:
+        '200':
+          description: Updated connection with confirmed root folder status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderIntegration'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/stats:
+    get:
+      tags: [Stats]
+      summary: Get storage statistics for a specific connection
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Bypass drive quota cache
+      responses:
+        '200':
+          description: Connection storage statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionStatsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/drive-index:
+    get:
+      tags: [Drive Index]
+      summary: Get the indexing status of the connected Google Drive
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+      responses:
+        '200':
+          description: Current index status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveIndexStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/drive-index/refresh:
+    post:
+      tags: [Drive Index]
+      summary: Schedule a refresh of the Drive index (incremental by default)
+      description: >-
+        Runs in background. The first run (or mode=full) scans the whole Drive; later runs apply only the
+        changes reported by the Google Drive Changes API. My Drive, items shared with the user and every
+        shared drive the user is a member of are indexed. If a run is already in progress, the current status
+        is returned and no new run starts. Poll GET drive-index until status leaves INDEXING.
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshDriveIndexRequest'
+      responses:
+        '202':
+          description: Refresh scheduled or already running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveIndexStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /connections/{connectionId}/drive-files:
+    get:
+      tags: [Drive Index]
+      summary: List indexed Drive files of a folder, or search by name across the index
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+        - name: parentId
+          in: query
+          required: false
+          schema:
+            type: string
+            default: root
+          description: >-
+            "root" (My Drive root), "shared-drives" (list of shared drives the user is a member of),
+            "shared" (items shared with the user without a visible parent) or a folder / shared drive id
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+          description: Case-insensitive name search across the whole index (ignores parentId)
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Page of indexed files, folders first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveFileList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/drive-files/{fileId}:
+    get:
+      tags: [Drive Index]
+      summary: Get metadata of an indexed Drive file
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+        - $ref: '#/components/parameters/DriveFileId'
+      responses:
+        '200':
+          description: Indexed file metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveFile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{connectionId}/drive-files/{fileId}/download-zip:
+    get:
+      tags: [Drive Index]
+      summary: Download an indexed folder (with subfolders) as ZIP
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+        - $ref: '#/components/parameters/DriveFileId'
+      responses:
+        '200':
+          description: ZIP generated in streaming (no Content-Length). Items that cannot be downloaded are listed in "LEIA-ME - arquivos nao incluidos.txt" inside the ZIP.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /connections/{connectionId}/drive-files/{fileId}/download:
+    get:
+      tags: [Drive Index]
+      summary: Download an indexed Drive file
+      description: >-
+        Streams the file from Google Drive. Google Docs, Sheets and Slides are exported to docx/xlsx/pptx and
+        Drawings to png. Folders (use download-zip) and other Google types (Forms, Sites, shortcuts) return 422.
+      parameters:
+        - $ref: '#/components/parameters/ConnectionId'
+        - $ref: '#/components/parameters/DriveFileId'
+      responses:
+        '200':
+          description: File binary content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /share-links:
+    post:
+      tags: [Share Links]
+      summary: Create a public share link for selected items of the Drive index
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShareLinkRequest'
+      responses:
+        '201':
+          description: Share link created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Share Links]
+      summary: List the share links of the authenticated user (newest first, up to 200)
+      parameters:
+        - name: connectionId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Share links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShareLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /share-links/{shareLinkId}:
+    get:
+      tags: [Share Links]
+      summary: Get a share link
+      parameters:
+        - $ref: '#/components/parameters/ShareLinkId'
+      responses:
+        '200':
+          description: Share link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /share-links/{shareLinkId}/revoke:
+    post:
+      tags: [Share Links]
+      summary: Revoke a share link (anyone with it loses access immediately)
+      parameters:
+        - $ref: '#/components/parameters/ShareLinkId'
+      responses:
+        '200':
+          description: Revoked share link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /public/shares/{token}:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Open a public share link (no authentication; the token is the credential)
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      responses:
+        '200':
+          description: Shared items (top level)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicShare'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/folders/{folderId}:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: List a folder that is shared or nested inside a shared folder / shared drive
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        '200':
+          description: Folder content (100 per page, folders first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicFolderList'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/download-zip:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Download every item of a public share link as ZIP
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+      responses:
+        '200':
+          description: ZIP generated in streaming (no Content-Length). Items that cannot be downloaded are listed in "LEIA-ME - arquivos nao incluidos.txt" inside the ZIP.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/folders/{folderId}/download-zip:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Download a folder of a public share link (with subfolders) as ZIP
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - name: folderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ZIP generated in streaming (no Content-Length). Items that cannot be downloaded are listed in "LEIA-ME - arquivos nao incluidos.txt" inside the ZIP.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/search:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Search by name inside the shared items and their folders (accent-insensitive)
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        '200':
+          description: Matching items (50 per page), folders first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicSearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/files/{fileId}/content:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Image, video or audio content to display inline (supports Range for video seeking)
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - $ref: '#/components/parameters/DriveFileId'
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+            example: bytes=0-
+      responses:
+        '200':
+          description: Whole file, served inline
+          content:
+            video/*:
+              schema:
+                type: string
+                format: binary
+            image/*:
+              schema:
+                type: string
+                format: binary
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Requested byte range (Content-Range header)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '416':
+          description: Range outside the file (Content-Range bytes */size)
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          description: Google Drive did not return the file (details are only logged server-side)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /public/shares/{token}/files/{fileId}/download:
+    get:
+      tags: [Public Shares]
+      security: []
+      summary: Download a file that is shared or nested inside a shared folder / shared drive
+      parameters:
+        - $ref: '#/components/parameters/ShareToken'
+        - $ref: '#/components/parameters/DriveFileId'
+      responses:
+        '200':
+          description: File binary content (Google Docs/Sheets/Slides exported to Office)
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          description: Google Drive did not return the file (details are only logged server-side)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /projects/{projectId}/api-keys:
     get:
       tags: [API Keys]
@@ -167,7 +729,7 @@ paths:
                   $ref: '#/components/schemas/ApiKey'
     post:
       tags: [API Keys]
-      summary: Create a project API key
+      summary: Create an API key
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       requestBody:
@@ -178,7 +740,7 @@ paths:
               $ref: '#/components/schemas/CreateApiKeyRequest'
       responses:
         '201':
-          description: Created API key; secret is returned once
+          description: Created key with one-time secret
           content:
             application/json:
               schema:
@@ -186,17 +748,31 @@ paths:
   /projects/{projectId}/api-keys/{apiKeyId}:
     delete:
       tags: [API Keys]
-      summary: Revoke a project API key
+      summary: Revoke an API key
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/ApiKeyId'
       responses:
         '204':
           description: Revoked
+  /projects/{projectId}/api-keys/{apiKeyId}/regenerate:
+    post:
+      tags: [API Keys]
+      summary: Regenerate an existing API key, revoking old secret and returning new secret
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/ApiKeyId'
+      responses:
+        '201':
+          description: Regenerated key with new one-time secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
   /projects/{projectId}/buckets:
     get:
       tags: [Buckets]
-      summary: List project buckets
+      summary: List virtual buckets for a project
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       responses:
@@ -221,15 +797,169 @@ paths:
               $ref: '#/components/schemas/CreateBucketRequest'
       responses:
         '201':
-          description: Created bucket
+          description: Bucket created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Bucket'
+  /projects/{projectId}/storage-pools:
+    get:
+      tags: [Storage Pools]
+      summary: List storage pools for a project
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Storage pools
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StoragePool'
+    post:
+      tags: [Storage Pools]
+      summary: Create a storage pool
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStoragePoolRequest'
+      responses:
+        '201':
+          description: Storage pool created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoragePool'
+  /storage-pools/{poolId}:
+    get:
+      tags: [Storage Pools]
+      summary: Get details of a storage pool
+      parameters:
+        - $ref: '#/components/parameters/PoolId'
+      responses:
+        '200':
+          description: Storage pool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoragePool'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Storage Pools]
+      summary: Update a storage pool
+      parameters:
+        - $ref: '#/components/parameters/PoolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStoragePoolRequest'
+      responses:
+        '200':
+          description: Updated pool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoragePool'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Storage Pools]
+      summary: Delete a storage pool
+      parameters:
+        - $ref: '#/components/parameters/PoolId'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /storage-pools/{poolId}/members:
+    post:
+      tags: [Storage Pools]
+      summary: Add a connection member to a storage pool
+      parameters:
+        - $ref: '#/components/parameters/PoolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPoolMemberRequest'
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolMember'
+  /storage-pools/{poolId}/members/{memberId}:
+    delete:
+      tags: [Storage Pools]
+      summary: Remove a member from a storage pool
+      parameters:
+        - $ref: '#/components/parameters/PoolId'
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Member removed
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /projects/{projectId}/stats/storage:
+    get:
+      tags: [Stats]
+      summary: Get storage breakdown by bucket and connection
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Bypass drive quota cache
+      responses:
+        '200':
+          description: Project storage statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectStorageStatsResponse'
+  /projects/{projectId}/stats/connections:
+    get:
+      tags: [Stats]
+      summary: Get list of storage stats for all user connections in project context
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Bypass drive quota cache
+      responses:
+        '200':
+          description: List of connection stats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConnectionStatsResponse'
   /projects/{projectId}/logs:
     get:
       tags: [Logs]
-      summary: List project operation logs
+      summary: List audit operation logs for a project
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - name: limit
@@ -254,7 +984,7 @@ paths:
       tags: [Objects]
       security:
         - apiKeyAuth: []
-      summary: List objects in a bucket
+      summary: List stored objects by prefix
       parameters:
         - $ref: '#/components/parameters/BucketId'
         - name: prefix
@@ -269,19 +999,20 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
-            default: 50
       responses:
         '200':
-          description: Objects
+          description: Objects list
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ObjectListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
       tags: [Objects]
       security:
         - apiKeyAuth: []
-      summary: Upload an object
+      summary: Upload an object to a virtual bucket
       parameters:
         - $ref: '#/components/parameters/BucketId'
       requestBody:
@@ -292,13 +1023,17 @@ paths:
               $ref: '#/components/schemas/UploadObjectRequest'
       responses:
         '201':
-          description: Uploaded object
+          description: Object uploaded
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StorageObject'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '413':
-          description: File exceeds the configured upload limit
+          description: File exceeds configured limit
           content:
             application/problem+json:
               schema:
@@ -308,18 +1043,54 @@ paths:
       tags: [Objects]
       security:
         - apiKeyAuth: []
-      summary: Download an object
+        - {}
+      summary: Download an object using API key header or temporary signed URL token
       parameters:
         - $ref: '#/components/parameters/BucketId'
         - $ref: '#/components/parameters/ObjectId'
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Ephemeral HMAC signed token for browser download without API key header
       responses:
         '200':
-          description: File bytes
+          description: Object binary content
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /buckets/{bucketId}/objects/{objectId}/sign-download:
+    post:
+      tags: [Objects]
+      security:
+        - apiKeyAuth: []
+      summary: Generate an ephemeral HMAC-signed URL for direct object download
+      parameters:
+        - $ref: '#/components/parameters/BucketId'
+        - $ref: '#/components/parameters/ObjectId'
+        - name: expiresIn
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 900
+          description: Validity in seconds (1 to 86400)
+      responses:
+        '200':
+          description: Ephemeral signed URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignedDownloadUrlResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
   /buckets/{bucketId}/objects/{objectId}:
@@ -333,7 +1104,11 @@ paths:
         - $ref: '#/components/parameters/ObjectId'
       responses:
         '204':
-          description: Deleted
+          description: Object deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   securitySchemes:
     bearerAuth:
@@ -347,6 +1122,20 @@ components:
   parameters:
     ProjectId:
       name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ConnectionId:
+      name: connectionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ApiKeyId:
+      name: apiKeyId
       in: path
       required: true
       schema:
@@ -366,20 +1155,35 @@ components:
       schema:
         type: string
         format: uuid
-    ApiKeyId:
-      name: apiKeyId
+    PoolId:
+      name: poolId
       in: path
       required: true
       schema:
         type: string
         format: uuid
-    IntegrationId:
-      name: integrationId
+    ShareLinkId:
+      name: shareLinkId
       in: path
       required: true
       schema:
         type: string
         format: uuid
+    ShareToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{43}$'
+      description: Secret token of the public share link
+    DriveFileId:
+      name: fileId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Google Drive file id
   responses:
     BadRequest:
       description: Bad request
@@ -395,6 +1199,42 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Forbidden (e.g. connection lacks the drive.readonly scope)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflict (e.g. connection is not active)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Folder exceeds the ZIP limits (SID3_ZIP_MAX_FILES / SID3_ZIP_MAX_MB)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Gone:
+      description: Share link revoked or expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServiceUnavailable:
+      description: The owner's Drive connection is revoked or lacks read access
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: The resource cannot be processed (e.g. folder download)
       content:
         application/json:
           schema:
@@ -484,9 +1324,22 @@ components:
           type: string
         state:
           type: string
+    UpdateConnectionRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          nullable: true
+    ConfirmSid3RootFolderRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [CONFIRM, DECLINE]
     ProviderIntegration:
       type: object
-      required: [id, provider, status, scopes, createdAt]
+      required: [id, provider, status, scopes, sid3RootFolderStatus, createdAt]
       properties:
         id:
           type: string
@@ -494,6 +1347,9 @@ components:
         provider:
           type: string
           enum: [GOOGLE_DRIVE]
+        displayName:
+          type: string
+          nullable: true
         providerAccountEmail:
           type: string
           format: email
@@ -505,6 +1361,9 @@ components:
           type: array
           items:
             type: string
+        sid3RootFolderStatus:
+          type: string
+          enum: [NOT_RESOLVED, PENDING_CONFIRMATION, CONFIRMED]
         createdAt:
           type: string
           format: date-time
@@ -548,7 +1407,7 @@ components:
           description: Returned once; store securely.
     CreateBucketRequest:
       type: object
-      required: [name, providerIntegrationId]
+      required: [name]
       properties:
         name:
           type: string
@@ -556,9 +1415,14 @@ components:
         providerIntegrationId:
           type: string
           format: uuid
+          nullable: true
+        storagePoolId:
+          type: string
+          format: uuid
+          nullable: true
     Bucket:
       type: object
-      required: [id, projectId, name, providerIntegrationId, createdAt]
+      required: [id, projectId, name, createdAt]
       properties:
         id:
           type: string
@@ -571,6 +1435,80 @@ components:
         providerIntegrationId:
           type: string
           format: uuid
+          nullable: true
+        storagePoolId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    CreateStoragePoolRequest:
+      type: object
+      required: [name, strategy]
+      properties:
+        name:
+          type: string
+          minLength: 2
+        strategy:
+          type: string
+          enum: [ROUND_ROBIN, FILL_FIRST]
+    UpdateStoragePoolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+        strategy:
+          type: string
+          enum: [ROUND_ROBIN, FILL_FIRST]
+    AddPoolMemberRequest:
+      type: object
+      required: [providerIntegrationId]
+      properties:
+        providerIntegrationId:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+          default: 0
+    PoolMember:
+      type: object
+      required: [id, storagePoolId, providerIntegrationId, priority, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        storagePoolId:
+          type: string
+          format: uuid
+        providerIntegrationId:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    StoragePool:
+      type: object
+      required: [id, projectId, name, strategy, members, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        strategy:
+          type: string
+          enum: [ROUND_ROBIN, FILL_FIRST]
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/PoolMember'
         createdAt:
           type: string
           format: date-time
@@ -626,6 +1564,79 @@ components:
         nextCursor:
           type: string
           nullable: true
+    SignedDownloadUrlResponse:
+      type: object
+      required: [url, token, expiresAt, expiresInSeconds]
+      properties:
+        url:
+          type: string
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        expiresInSeconds:
+          type: integer
+    ConnectionStatsResponse:
+      type: object
+      required: [connectionId, provider, status, sizeBytes, objectCount]
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          nullable: true
+        providerAccountEmail:
+          type: string
+          format: email
+          nullable: true
+        provider:
+          type: string
+          enum: [GOOGLE_DRIVE]
+        status:
+          type: string
+          enum: [CONNECTED, REVOKED, ERROR]
+        sizeBytes:
+          type: string
+        objectCount:
+          type: integer
+        driveQuotaLimitBytes:
+          type: string
+          nullable: true
+        driveQuotaUsageBytes:
+          type: string
+          nullable: true
+        driveQuotaUsageInDriveBytes:
+          type: string
+          nullable: true
+    ProjectStorageStatsResponse:
+      type: object
+      required: [totalSizeBytes, totalObjectCount, byBucket, byConnection]
+      properties:
+        totalSizeBytes:
+          type: string
+        totalObjectCount:
+          type: integer
+        byBucket:
+          type: array
+          items:
+            type: object
+            required: [bucketId, bucketName, sizeBytes, objectCount]
+            properties:
+              bucketId:
+                type: string
+                format: uuid
+              bucketName:
+                type: string
+              sizeBytes:
+                type: string
+              objectCount:
+                type: integer
+        byConnection:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectionStatsResponse'
     OperationLog:
       type: object
       required: [id, projectId, operation, status, requestId, createdAt]
@@ -690,3 +1701,303 @@ components:
           enum: [413]
         detail:
           type: string
+    DriveIndexStatus:
+      type: object
+      required: [connectionId, status, hasReadScope, startedAt, lastIndexedAt, itemCount, lastError]
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [NEVER_INDEXED, INDEXING, READY, FAILED]
+        hasReadScope:
+          type: boolean
+          description: Connection has drive.readonly (or drive) scope
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastIndexedAt:
+          type: string
+          format: date-time
+          nullable: true
+        itemCount:
+          type: integer
+        lastError:
+          type: string
+          nullable: true
+    RefreshDriveIndexRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [incremental, full]
+          default: incremental
+    DriveFile:
+      type: object
+      required: [id, parentId, driveId, isSharedDrive, name, mimeType, isFolder, sizeBytes, md5Checksum, modifiedTime, webViewLink, downloadable, exportExtension, indexedAt]
+      properties:
+        id:
+          type: string
+          description: Google Drive file id (for a shared drive entry, the shared drive id)
+        parentId:
+          type: string
+          nullable: true
+        driveId:
+          type: string
+          nullable: true
+          description: Shared drive that contains the item; null for My Drive items
+        isSharedDrive:
+          type: boolean
+          description: The item is a shared drive itself (top-level folder)
+        name:
+          type: string
+        mimeType:
+          type: string
+        isFolder:
+          type: boolean
+        sizeBytes:
+          type: integer
+          nullable: true
+        md5Checksum:
+          type: string
+          nullable: true
+        modifiedTime:
+          type: string
+          format: date-time
+          nullable: true
+        webViewLink:
+          type: string
+          nullable: true
+        downloadable:
+          type: boolean
+        exportExtension:
+          type: string
+          nullable: true
+          description: Extension used when exporting native Google files (docx, xlsx, pptx, png)
+        indexedAt:
+          type: string
+          format: date-time
+    DriveFolderCrumb:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    DriveFileList:
+      type: object
+      required: [items, total, page, pageSize, parentId, section, breadcrumb]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveFile'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        parentId:
+          type: string
+          nullable: true
+        section:
+          type: string
+          enum: [my-drive, shared-drives, shared-with-me, search]
+          description: Section that contains the listed folder
+        breadcrumb:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveFolderCrumb'
+    CreateShareLinkRequest:
+      type: object
+      required: [connectionId, fileIds]
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+        fileIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+            maxLength: 200
+          description: Google Drive ids of files, folders or shared drives present in the connection index
+        name:
+          type: string
+          maxLength: 120
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Omit for a link that never expires
+    ShareLinkItem:
+      type: object
+      required: [id, name, mimeType, isFolder, available]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        isFolder:
+          type: boolean
+        available:
+          type: boolean
+          description: False when the item is no longer in the Drive index
+    ShareLink:
+      type: object
+      required: [id, connectionId, name, token, publicPath, status, expiresAt, revokedAt, accessCount, lastAccessedAt, createdAt, items]
+      properties:
+        id:
+          type: string
+          format: uuid
+        connectionId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        token:
+          type: string
+          description: Secret token; anyone with it can access the items
+        publicPath:
+          type: string
+          example: /s/Xb3...
+          description: Path of the public page in the dashboard
+        status:
+          type: string
+          enum: [ACTIVE, EXPIRED, REVOKED]
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        accessCount:
+          type: integer
+        lastAccessedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShareLinkItem'
+    PublicShareItem:
+      type: object
+      required: [id, name, mimeType, isFolder, isSharedDrive, sizeBytes, modifiedTime, downloadable, exportExtension, previewKind]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        mimeType:
+          type: string
+        isFolder:
+          type: boolean
+        isSharedDrive:
+          type: boolean
+        sizeBytes:
+          type: integer
+          nullable: true
+        modifiedTime:
+          type: string
+          format: date-time
+          nullable: true
+        downloadable:
+          type: boolean
+        exportExtension:
+          type: string
+          nullable: true
+        previewKind:
+          type: string
+          enum: [image, video, audio]
+          nullable: true
+          description: Preview available at /files/{fileId}/content
+    PublicSearchItem:
+      allOf:
+        - $ref: '#/components/schemas/PublicShareItem'
+        - type: object
+          required: [path, parentId]
+          properties:
+            path:
+              type: array
+              items:
+                type: string
+              description: Folder names from the shared item down to the result (excluding the result)
+            parentId:
+              type: string
+              nullable: true
+              description: Folder containing the result; null when the result is one of the link items
+    PublicSearchResult:
+      type: object
+      required: [query, items, total, page, pageSize]
+      properties:
+        query:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicSearchItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+    PublicShare:
+      type: object
+      required: [name, sharedBy, createdAt, expiresAt, items]
+      properties:
+        name:
+          type: string
+          nullable: true
+        sharedBy:
+          type: string
+          nullable: true
+          description: Display name of the owner (never the e-mail)
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicShareItem'
+    PublicFolderList:
+      type: object
+      required: [folder, breadcrumb, items, total, page, pageSize]
+      properties:
+        folder:
+          $ref: '#/components/schemas/DriveFolderCrumb'
+        breadcrumb:
+          type: array
+          description: Path from the shared item down to the listed folder
+          items:
+            $ref: '#/components/schemas/DriveFolderCrumb'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicShareItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
