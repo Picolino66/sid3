@@ -1,0 +1,852 @@
+{
+  "captures": [
+    {
+      "name": "login--desktop-light",
+      "title": "Entrar · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "login--desktop-dark",
+      "title": "Entrar · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "login--mobile-light",
+      "title": "Entrar · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "login--mobile-dark",
+      "title": "Entrar · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "register--desktop-light",
+      "title": "Criar conta · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "register--desktop-dark",
+      "title": "Criar conta · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "register--mobile-light",
+      "title": "Criar conta · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "register--mobile-dark",
+      "title": "Criar conta · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--desktop-light",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--desktop-dark",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--mobile-light",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--mobile-dark",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "files--desktop-light",
+      "title": "Arquivos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "files--desktop-dark",
+      "title": "Arquivos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "files--mobile-light",
+      "title": "Arquivos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "files--mobile-dark",
+      "title": "Arquivos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "drive--desktop-light",
+      "title": "Meu Drive · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "drive--desktop-dark",
+      "title": "Meu Drive · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "drive--mobile-light",
+      "title": "Meu Drive · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "drive--mobile-dark",
+      "title": "Meu Drive · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "share-links--desktop-light",
+      "title": "Links compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "share-links--desktop-dark",
+      "title": "Links compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "share-links--mobile-light",
+      "title": "Links compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "share-links--mobile-dark",
+      "title": "Links compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "storage--desktop-light",
+      "title": "Armazenamento · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "storage--desktop-dark",
+      "title": "Armazenamento · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "storage--mobile-light",
+      "title": "Armazenamento · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "storage--mobile-dark",
+      "title": "Armazenamento · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "stats--desktop-light",
+      "title": "Estatísticas · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "stats--desktop-dark",
+      "title": "Estatísticas · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "stats--mobile-light",
+      "title": "Estatísticas · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "stats--mobile-dark",
+      "title": "Estatísticas · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--desktop-light",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--desktop-dark",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--mobile-light",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--mobile-dark",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "logs--desktop-light",
+      "title": "Logs · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "logs--desktop-dark",
+      "title": "Logs · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "logs--mobile-light",
+      "title": "Logs · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "logs--mobile-dark",
+      "title": "Logs · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "docs--desktop-light",
+      "title": "Documentação da API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "docs--desktop-dark",
+      "title": "Documentação da API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "docs--mobile-light",
+      "title": "Documentação da API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "docs--mobile-dark",
+      "title": "Documentação da API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "projects--desktop-light",
+      "title": "Projetos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "projects--desktop-dark",
+      "title": "Projetos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "projects--mobile-light",
+      "title": "Projetos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "projects--mobile-dark",
+      "title": "Projetos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--desktop-light",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--desktop-dark",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--mobile-light",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--mobile-dark",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "public-share--desktop-light",
+      "title": "Arquivos compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "public-share--desktop-dark",
+      "title": "Arquivos compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "public-share--mobile-light",
+      "title": "Arquivos compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "public-share--mobile-dark",
+      "title": "Arquivos compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--empty--desktop-light",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--empty--mobile-dark",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--no-project--desktop-light",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--no-project--mobile-dark",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--error--desktop-light",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--error--mobile-dark",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--error--desktop-light",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--error--mobile-dark",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--empty--desktop-light",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--empty--mobile-dark",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "logs--empty--desktop-light",
+      "title": "Logs · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "logs--empty--mobile-dark",
+      "title": "Logs · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "storage--empty--desktop-light",
+      "title": "Armazenamento · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "storage--empty--mobile-dark",
+      "title": "Armazenamento · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "share-links--empty--desktop-light",
+      "title": "Links compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "share-links--empty--mobile-dark",
+      "title": "Links compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "public-share--error--desktop-light",
+      "title": "Arquivos compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "public-share--error--mobile-dark",
+      "title": "Arquivos compartilhados · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--menu-aberto--desktop-light",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--menu-aberto--desktop-dark",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--confirmacao--desktop-light",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "connections--confirmacao--desktop-dark",
+      "title": "Conexões · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--nova-chave-validacao--desktop-light",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "api-keys--nova-chave-validacao--desktop-dark",
+      "title": "Chaves de API · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "register--validacao--desktop-light",
+      "title": "Criar conta · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "register--validacao--desktop-dark",
+      "title": "Criar conta · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "drive--selecao--desktop-light",
+      "title": "Meu Drive · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "drive--selecao--desktop-dark",
+      "title": "Meu Drive · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "projects--menu-projeto--desktop-light",
+      "title": "Projetos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "projects--menu-projeto--desktop-dark",
+      "title": "Projetos · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--gaveta--mobile-light",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    },
+    {
+      "name": "overview--gaveta--mobile-dark",
+      "title": "Início · SID3",
+      "overflow": null,
+      "lowContrast": [],
+      "unnamed": [],
+      "imgsNoAlt": 0,
+      "emoji": 0
+    }
+  ],
+  "focus": {
+    "login": [
+      "Criar conta"
+    ],
+    "register": [
+      "Entrar"
+    ],
+    "overview": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "files": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "drive": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "share-links": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "storage": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "stats": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "api-keys": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "logs": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "docs": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "projects": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "connections": [
+      "S3SID3",
+      "Conta e tema"
+    ],
+    "public-share": [
+      "Itens compartilhados"
+    ]
+  },
+  "console": {}
+}

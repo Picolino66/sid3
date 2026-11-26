@@ -1,0 +1,189 @@
+/*
+ * SID3 Design System — tokens.
+ * Fonte única de cores, tipografia, espaço, raios, sombras, movimento e camadas.
+ * Nenhum valor de cor deve aparecer fora deste arquivo. Ver docs/ux/design-system.md.
+ */
+:root {
+  color-scheme: light;
+
+  /* superfícies */
+  --color-page: #f5f7f8;
+  --color-card: #ffffff;
+  --color-soft: #eef1f3;
+  --color-side: #f9fafb;
+  /* texto */
+  --color-ink: #111820;
+  --color-ink-2: #3d4854;
+  --color-muted: #5c6875;
+  /* linhas */
+  --color-line: rgb(17 24 32 / 0.08);
+  --color-line-strong: rgb(17 24 32 / 0.16);
+  /* marca e ação */
+  --color-accent: #13695d;
+  --color-accent-hover: #0f574d;
+  --color-on-accent: #ffffff;
+  --color-accent-text: #0f5f54;
+  /* semântica (texto/ícone; fundos = token + alpha) */
+  --color-success: #16733d;
+  --color-warn: #9a5b00;
+  --color-danger: #c03a2b;
+  --color-danger-hover: #a52f22;
+  --color-on-danger: #ffffff;
+  --color-info: #1f62c7;
+  /* utilitários */
+  --color-focus: #1f62c7;
+  --color-overlay: rgb(10 15 20 / 0.48);
+  --color-tip: #1b232b;
+  --color-on-tip: #f3f6f8;
+  --color-media: #0b0f13;
+  --color-on-media: #f3f6f8;
+  --color-code: #111820;
+  --color-on-code: #d4dbe3;
+  --color-code-var: #f29e74;
+  --color-switch-knob: #ffffff;
+
+  /* tipografia */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* espaçamento (base 4) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* raios */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* controles */
+  --control-sm: 32px;
+  --control-md: 36px;
+  --control-lg: 40px;
+
+  /* sombras */
+  --shadow-card: 0 1px 2px rgb(17 24 32 / 0.04), 0 1px 1px rgb(17 24 32 / 0.02);
+  --shadow-pop: 0 12px 32px -8px rgb(17 24 32 / 0.18), 0 0 0 1px rgb(17 24 32 / 0.06);
+  --shadow-modal: 0 24px 64px -12px rgb(17 24 32 / 0.32), 0 0 0 1px rgb(17 24 32 / 0.06);
+
+  /* movimento */
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-slow: 250ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* camadas */
+  --z-sticky: 10;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-menu: 55;
+  --z-toast: 60;
+  --z-tooltip: 70;
+
+  /* layout */
+  --sidebar-w: 248px;
+  --topbar-h: 56px;
+  --content-max: 1280px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control-sm: 40px;
+    --control-md: 44px;
+  }
+}
+
+/* Escuro: mesmos nomes, novos valores. Segue o sistema, a menos que o usuário fixe um tema. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-page: #0b0f13;
+    --color-card: #131a20;
+    --color-soft: #1b242c;
+    --color-side: #0f1418;
+    --color-ink: #edf1f4;
+    --color-ink-2: #c2cbd3;
+    --color-muted: #8e9aa6;
+    --color-line: rgb(255 255 255 / 0.08);
+    --color-line-strong: rgb(255 255 255 / 0.16);
+    --color-accent: #34c9ac;
+    --color-accent-hover: #4fd6bb;
+    --color-on-accent: #04211c;
+    --color-accent-text: #4fd6bb;
+    --color-success: #4ade80;
+    --color-warn: #f5b84a;
+    --color-danger: #f87171;
+    --color-danger-hover: #fb8f8f;
+    --color-on-danger: #2a0806;
+    --color-info: #6aa8ff;
+    --color-focus: #6aa8ff;
+    --color-overlay: rgb(0 0 0 / 0.6);
+    --color-tip: #2a3540;
+    --color-code: #0b0f13;
+    --color-switch-knob: #edf1f4;
+    --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.02);
+    --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.08);
+    --shadow-modal: 0 24px 64px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.08);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-page: #0b0f13;
+  --color-card: #131a20;
+  --color-soft: #1b242c;
+  --color-side: #0f1418;
+  --color-ink: #edf1f4;
+  --color-ink-2: #c2cbd3;
+  --color-muted: #8e9aa6;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-strong: rgb(255 255 255 / 0.16);
+  --color-accent: #34c9ac;
+  --color-accent-hover: #4fd6bb;
+  --color-on-accent: #04211c;
+  --color-accent-text: #4fd6bb;
+  --color-success: #4ade80;
+  --color-warn: #f5b84a;
+  --color-danger: #f87171;
+  --color-danger-hover: #fb8f8f;
+  --color-on-danger: #2a0806;
+  --color-info: #6aa8ff;
+  --color-focus: #6aa8ff;
+  --color-overlay: rgb(0 0 0 / 0.6);
+  --color-tip: #2a3540;
+  --color-code: #0b0f13;
+  --color-switch-knob: #edf1f4;
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-modal: 0 24px 64px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+  }
+}

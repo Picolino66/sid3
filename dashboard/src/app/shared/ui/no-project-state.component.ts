@@ -1,20 +1,39 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { EmptyStateComponent } from './empty-state.component';
+import { ErrorStateComponent } from './error-state.component';
 
-/** Estado vazio das telas de projeto quando o usuário ainda não criou nenhum projeto. */
+/**
+ * Exibido nas telas de projeto quando não há projeto selecionado. Distingue "a lista de projetos não carregou"
+ * (erro com Tentar novamente) de "o usuário ainda não criou projetos" (vazio com CTA).
+ */
 @Component({
   selector: 'sid3-no-project-state',
-  imports: [RouterLink],
+  imports: [RouterLink, EmptyStateComponent, ErrorStateComponent],
   template: `
-    <section class="panel empty-cta">
-      <h2>Nenhum projeto selecionado</h2>
-      <p class="muted">
-        Projetos organizam buckets, chaves de API e quais contas do Google Drive cada um usa. Crie um projeto para
-        começar.
-      </p>
-      <a class="button-link" routerLink="/projects">Criar projeto</a>
+    <section class="card">
+      @if (projectContext.loadError(); as failure) {
+        <sid3-error-state
+          title="Não foi possível carregar seus projetos"
+          [message]="failure.message"
+          [details]="failure.details"
+          [busy]="projectContext.isLoading()"
+          (retry)="projectContext.retry()"
+        />
+      } @else {
+        <sid3-empty-state
+          icon="layers"
+          title="Crie seu primeiro projeto"
+          description="Projetos organizam buckets, chaves de API e quais contas do Google Drive cada um usa."
+        >
+          <a class="btn btn--primary" routerLink="/projects">Criar projeto</a>
+        </sid3-empty-state>
+      }
     </section>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class NoProjectStateComponent {}
+export class NoProjectStateComponent {
+  protected readonly projectContext = inject(ProjectContextService);
+}

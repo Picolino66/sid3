@@ -1,20 +1,20 @@
-import { DecimalPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { finalize } from 'rxjs';
-import { ProjectContextService } from '../../core/project-context/project-context.service';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { toApiErrorMessage } from '../../core/api/api-error';
+import { finalize } from 'rxjs';
+import { toApiErrorDetails, toApiErrorMessage } from '../../core/api/api-error';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { EmptyStateComponent } from '../../shared/ui/empty-state.component';
+import { ErrorStateComponent } from '../../shared/ui/error-state.component';
+import { connectionStatusLabel, connectionStatusTone, formatBytes, formatCount, initials, plural } from '../../shared/ui/format';
+import { IconComponent } from '../../shared/ui/icon.component';
+import { NoProjectStateComponent } from '../../shared/ui/no-project-state.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header.component';
+import { SkeletonComponent } from '../../shared/ui/skeleton.component';
+import { TableSort } from '../../shared/ui/table-sort';
 import { ProjectStorageStats } from './stats.models';
 import { StatsService } from './stats.service';
 
-function formatBytes(bytesStr: string): string {
-  const bytes = Number(bytesStr);
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
+type BucketSortKey = 'name' | 'size' | 'count';
 
 function usagePercent(used: string, total: string): number {
   const usedN = Number(used);
@@ -25,137 +25,182 @@ function usagePercent(used: string, total: string): number {
 
 @Component({
   selector: 'sid3-stats-page',
-  imports: [DecimalPipe],
+  imports: [EmptyStateComponent, ErrorStateComponent, IconComponent, NoProjectStateComponent, PageHeaderComponent, SkeletonComponent],
   template: `
-    <header class="topbar">
-      <div>
-        <h1>Estatísticas</h1>
-      </div>
-    </header>
+    <sid3-page-header title="Estatísticas" description="Quanto este projeto guarda, em quais contas e em quais buckets.">
+      @if (selectedProjectId()) {
+        <button class="btn" type="button" [disabled]="isLoading()" (click)="reload()">
+          <sid3-icon name="refresh" [spin]="isLoading()" />{{ isLoading() ? 'Atualizando...' : 'Atualizar' }}
+        </button>
+      }
+    </sid3-page-header>
 
-    @if (errorMessage()) {
-      <p class="form-error">{{ errorMessage() }}</p>
-    }
-
-    @if (isLoading()) {
-      <p class="muted">Carregando estatísticas...</p>
-    } @else if (stats()) {
-      <div class="stats-kpi-row">
-        <div class="kpi-card">
-          <span class="kpi-label">Armazenamento usado</span>
-          <strong class="kpi-value">{{ formatBytes(stats()!.totalSizeBytes) }}</strong>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">Total de arquivos</span>
-          <strong class="kpi-value">{{ stats()!.totalObjectCount | number }}</strong>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">Drives conectados</span>
-          <strong class="kpi-value">{{ stats()!.byConnection.length }}</strong>
-        </div>
-      </div>
-
-      <section class="panel">
-        <header>
-          <h2>Por conexão</h2>
-        </header>
-        @if (stats()!.byConnection.length === 0) {
-          <p class="empty-state">Nenhum uso ainda.</p>
-        } @else {
-          <div class="conn-stat-list">
-            @for (conn of stats()!.byConnection; track conn.connectionId) {
-              <div class="conn-stat-row">
-                <div class="conn-stat-identity">
-                  <strong>{{ conn.displayName ?? 'Google Drive' }}</strong>
-                  @if (conn.providerAccountEmail) {
-                    <span class="muted">{{ conn.providerAccountEmail }}</span>
-                  }
-                  <span [class]="'status-label ' + conn.status.toLowerCase()">
-                    {{ conn.status === 'CONNECTED' ? 'Conectado' : conn.status === 'REVOKED' ? 'Revogado' : 'Erro' }}
-                  </span>
-                </div>
-
-                <div class="conn-stat-numbers">
-                  <div class="conn-stat-metric">
-                    <span class="conn-stat-metric-label">Armazenado via SID3</span>
-                    <span class="conn-stat-size">{{ formatBytes(conn.sizeBytes) }}</span>
-                    <span class="muted">{{ conn.objectCount | number }} arquivos</span>
-                  </div>
-                  @if (conn.driveQuotaUsageBytes !== null) {
-                    <div class="conn-stat-metric">
-                      <span class="conn-stat-metric-label">Uso total do Drive</span>
-                      <span class="conn-stat-size">{{ formatBytes(conn.driveQuotaUsageBytes) }}</span>
-                      @if (conn.driveQuotaLimitBytes) {
-                        <span class="muted">de {{ formatBytes(conn.driveQuotaLimitBytes) }}</span>
-                      } @else {
-                        <span class="muted">ilimitado</span>
-                      }
-                    </div>
-                  }
-                </div>
-
-                @if (conn.driveQuotaUsageBytes !== null && conn.driveQuotaLimitBytes) {
-                  <div class="conn-stat-bar-group">
-                    <div class="conn-stat-bar-label">
-                      <span>Cota do Google Drive</span>
-                      <span>{{ usagePercent(conn.driveQuotaUsageBytes, conn.driveQuotaLimitBytes) }}%</span>
-                    </div>
-                    <div class="conn-stat-bar">
-                      <div class="conn-stat-bar-fill" [style.width.%]="usagePercent(conn.driveQuotaUsageBytes, conn.driveQuotaLimitBytes)"></div>
-                    </div>
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        }
+    @if (projectContext.loaded() && !selectedProjectId()) {
+      <sid3-no-project-state />
+    } @else if (stats(); as data) {
+      <section class="kpis" [style.opacity]="isLoading() ? 0.6 : 1" aria-label="Totais do projeto">
+        <article class="card kpi">
+          <div class="kpi__top">Espaço usado<span class="kpi__icon"><sid3-icon name="db" /></span></div>
+          <div class="kpi__value">{{ bytes(data.totalSizeBytes) }}</div>
+          <div class="kpi__foot">guardado via SID3</div>
+        </article>
+        <article class="card kpi">
+          <div class="kpi__top">Arquivos<span class="kpi__icon"><sid3-icon name="file" /></span></div>
+          <div class="kpi__value">{{ count(data.totalObjectCount) }}</div>
+          <div class="kpi__foot">{{ plural(data.byBucket.length, 'bucket', 'buckets') }}</div>
+        </article>
+        <article class="card kpi">
+          <div class="kpi__top">Contas do Drive<span class="kpi__icon"><sid3-icon name="drive" /></span></div>
+          <div class="kpi__value">{{ count(data.byConnection.length) }}</div>
+          <div class="kpi__foot">no projeto</div>
+        </article>
       </section>
 
-      <section class="panel">
-        <header>
-          <h2>Por bucket</h2>
-        </header>
-        @if (stats()!.byBucket.length === 0) {
-          <p class="empty-state">Nenhum bucket tem dados ainda.</p>
-        } @else {
-          <div class="table stats-bucket-table" role="table" aria-label="Armazenamento por bucket">
-            <div role="row" class="head">
-              <span role="columnheader">Bucket</span>
-              <span role="columnheader">Tamanho</span>
-              <span role="columnheader">Arquivos</span>
+      <div class="grid-2" style="align-items: start">
+        <section class="card">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Por conta do Drive</h2>
+              <p class="card__desc">Quanto o SID3 guardou em cada conta e a cota total do Google.</p>
             </div>
-            @for (bucket of stats()!.byBucket; track bucket.bucketId) {
-              <div role="row">
-                <span role="cell">{{ bucket.bucketName }}</span>
-                <span role="cell">{{ formatBytes(bucket.sizeBytes) }}</span>
-                <span role="cell">{{ bucket.objectCount | number }}</span>
-              </div>
-            }
-          </div>
-        }
+          </header>
+          @if (data.byConnection.length === 0) {
+            <sid3-empty-state icon="drive" title="Nenhuma conta com uso ainda" description="Os números aparecem depois dos primeiros envios." [compact]="true" />
+          } @else {
+            <ul class="row-list" style="margin-top: var(--space-3)">
+              @for (conn of data.byConnection; track conn.connectionId) {
+                <li class="row-item conn">
+                  <div class="conn__head">
+                    <span class="row-item__avatar" aria-hidden="true">{{ initials(conn.displayName ?? conn.providerAccountEmail) }}</span>
+                    <div class="row-item__main">
+                      <strong class="truncate">{{ conn.displayName ?? 'Google Drive' }}</strong>
+                      <span class="row-item__meta truncate">{{ conn.providerAccountEmail ?? '—' }}</span>
+                    </div>
+                    <span [class]="'chip chip--' + statusTone(conn.status)">{{ statusLabel(conn.status) }}</span>
+                  </div>
+                  <div class="conn__numbers">
+                    <div>
+                      <span class="conn__label">Via SID3</span>
+                      <strong class="tabular">{{ bytes(conn.sizeBytes) }}</strong>
+                      <span class="muted text-xs">{{ plural(conn.objectCount, 'arquivo', 'arquivos') }}</span>
+                    </div>
+                    @if (conn.driveQuotaUsageBytes !== null) {
+                      <div>
+                        <span class="conn__label">Uso total do Drive</span>
+                        <strong class="tabular">{{ bytes(conn.driveQuotaUsageBytes) }}</strong>
+                        <span class="muted text-xs">{{ conn.driveQuotaLimitBytes ? 'de ' + bytes(conn.driveQuotaLimitBytes) : 'sem limite' }}</span>
+                      </div>
+                    }
+                  </div>
+                  @if (conn.driveQuotaUsageBytes !== null && conn.driveQuotaLimitBytes) {
+                    @let percent = usagePercent(conn.driveQuotaUsageBytes, conn.driveQuotaLimitBytes);
+                    <div class="conn__quota">
+                      <div class="cluster cluster--between text-xs">
+                        <span class="muted">Cota do Google Drive</span>
+                        <span class="tabular" [class.text-danger]="percent >= 90">{{ percent }}%</span>
+                      </div>
+                      <div class="meter" [class.meter--warn]="percent >= 75 && percent < 90" [class.meter--danger]="percent >= 90" role="progressbar" [attr.aria-valuenow]="percent" aria-valuemin="0" aria-valuemax="100" aria-label="Cota do Google Drive usada">
+                        <span [style.width.%]="percent"></span>
+                      </div>
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        </section>
+
+        <section class="card">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Por bucket</h2>
+              <p class="card__desc">Tamanho e quantidade de arquivos de cada bucket.</p>
+            </div>
+          </header>
+          @if (data.byBucket.length === 0) {
+            <sid3-empty-state icon="folder" title="Nenhum bucket com dados ainda" [compact]="true" />
+          } @else {
+            <div class="table-wrap" style="margin-top: var(--space-3)">
+              <table class="table table--responsive">
+                <thead>
+                  <tr>
+                    <th [attr.aria-sort]="sort.aria('name')"><button class="sort-btn" type="button" (click)="sort.toggle('name')">Bucket <sid3-icon [name]="sort.icon('name')" size="sm" /></button></th>
+                    <th class="num" [attr.aria-sort]="sort.aria('size')"><button class="sort-btn" type="button" (click)="sort.toggle('size')">Tamanho <sid3-icon [name]="sort.icon('size')" size="sm" /></button></th>
+                    <th class="num" [attr.aria-sort]="sort.aria('count')"><button class="sort-btn" type="button" (click)="sort.toggle('count')">Arquivos <sid3-icon [name]="sort.icon('count')" size="sm" /></button></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (bucket of buckets(); track bucket.bucketId) {
+                    <tr>
+                      <td class="cell-primary">
+                        <div class="cell-main">
+                          <strong class="mono truncate" style="min-width: 140px">{{ bucket.bucketName }}</strong>
+                          <span class="meter meter--slim" style="max-width: 180px" aria-hidden="true"><span [style.width.%]="share(bucket.sizeBytes, data.totalSizeBytes)"></span></span>
+                        </div>
+                      </td>
+                      <td class="num" data-label="Tamanho">{{ bytes(bucket.sizeBytes) }}</td>
+                      <td class="num" data-label="Arquivos">{{ count(bucket.objectCount) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+      </div>
+    } @else if (errorMessage()) {
+      <section class="card">
+        <sid3-error-state title="Não foi possível carregar as estatísticas" [message]="errorMessage()!" [details]="errorDetails()" [busy]="isLoading()" (retry)="reload()" />
       </section>
+    } @else {
+      <sid3-skeleton variant="kpis" [count]="3" label="Carregando estatísticas" />
     }
   `,
+  styles: [
+    `
+      .conn { align-items: stretch; display: grid; gap: var(--space-3); }
+      .conn__head { align-items: center; display: flex; gap: var(--space-3); min-width: 0; }
+      .conn__numbers { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-8); padding-left: calc(36px + var(--space-3)); }
+      .conn__numbers > div { display: grid; gap: 2px; }
+      .conn__numbers strong { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+      .conn__label { color: var(--color-muted); font-size: var(--text-xs); }
+      .conn__quota { display: grid; gap: 6px; padding-left: calc(36px + var(--space-3)); }
+      @media (max-width: 640px) { .conn__numbers, .conn__quota { padding-left: 0; } }
+    `
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class StatsPageComponent {
   protected readonly projectContext = inject(ProjectContextService);
   private readonly statsService = inject(StatsService);
 
-  protected readonly projects = this.projectContext.projects;
   protected readonly selectedProjectId = computed(() => this.projectContext.currentProjectId() ?? '');
   protected readonly stats = signal<ProjectStorageStats | null>(null);
   protected readonly isLoading = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly errorDetails = signal<string | null>(null);
+  protected readonly sort = new TableSort<BucketSortKey>('size', 'desc');
 
-  protected readonly formatBytes = formatBytes;
   protected readonly usagePercent = usagePercent;
+  protected readonly initials = initials;
+  protected readonly plural = plural;
+  protected readonly statusLabel = connectionStatusLabel;
+  protected readonly statusTone = connectionStatusTone;
+
+  protected readonly buckets = computed(() =>
+    this.sort.apply(this.stats()?.byBucket ?? [], {
+      name: (bucket) => bucket.bucketName,
+      size: (bucket) => Number(bucket.sizeBytes),
+      count: (bucket) => bucket.objectCount
+    })
+  );
 
   constructor() {
     toObservable(this.projectContext.currentProjectId)
       .pipe(takeUntilDestroyed())
       .subscribe((projectId) => {
         if (projectId) {
+          this.stats.set(null);
           this.loadStats(projectId);
         } else {
           this.isLoading.set(false);
@@ -163,16 +208,36 @@ export class StatsPageComponent {
       });
   }
 
+  reload(): void {
+    const projectId = this.selectedProjectId();
+    if (projectId) this.loadStats(projectId);
+  }
+
+  protected bytes(value: string | number | null): string {
+    return formatBytes(value === null ? null : Number(value));
+  }
+
+  protected count(value: number): string {
+    return formatCount(value);
+  }
+
+  protected share(part: string, total: string): number {
+    const totalN = Number(total);
+    return totalN > 0 ? Math.max(2, Math.round((Number(part) / totalN) * 100)) : 0;
+  }
 
   private loadStats(projectId: string): void {
     this.isLoading.set(true);
-    this.stats.set(null);
+    this.errorMessage.set(null);
     this.statsService
       .getProjectStorageStats(projectId)
       .pipe(finalize(() => this.isLoading.set(false)))
       .subscribe({
         next: (stats) => this.stats.set(stats),
-        error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+        error: (error: unknown) => {
+          this.errorMessage.set(toApiErrorMessage(error));
+          this.errorDetails.set(toApiErrorDetails(error));
+        }
       });
   }
 }

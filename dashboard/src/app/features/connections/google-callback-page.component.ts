@@ -4,26 +4,30 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { take } from 'rxjs';
 import { toApiErrorMessage } from '../../core/api/api-error';
 import { ConnectionsService } from './connections.service';
+import { ErrorStateComponent } from '../../shared/ui/error-state.component';
+import { IconComponent } from '../../shared/ui/icon.component';
 
 @Component({
   selector: 'sid3-google-callback-page',
-  imports: [RouterLink],
+  imports: [RouterLink, IconComponent, ErrorStateComponent],
   template: `
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Google Drive</p>
-        <h1>Concluindo conexão</h1>
-      </div>
-    </header>
-
-    <section class="panel">
+    <section class="card" style="max-width: 560px; margin: var(--space-10) auto 0; width: 100%">
       @if (isLoading()) {
-        <p class="muted">Concluindo autorização do Google Drive...</p>
+        <div class="state">
+          <span class="state__icon"><sid3-icon name="loader" size="lg" [spin]="true" /></span>
+          <h1 class="state__title">Concluindo a conexão com o Google Drive</h1>
+          <p class="state__text">Isso leva só alguns segundos.</p>
+        </div>
       } @else if (errorMessage()) {
-        <p class="form-error">{{ errorMessage() }}</p>
-        <a class="button-link" routerLink="/connections">Voltar para conexões</a>
+        <sid3-error-state title="Não foi possível conectar o Google Drive" icon="plug" [message]="errorMessage()!" [retryable]="false">
+          <a class="btn btn--primary btn--sm" routerLink="/connections">Voltar para Conexões</a>
+        </sid3-error-state>
       } @else {
-        <p class="empty-state">Google Drive conectado. Redirecionando...</p>
+        <div class="state" role="status">
+          <span class="state__icon"><sid3-icon name="ok" size="lg" /></span>
+          <h1 class="state__title">Google Drive conectado</h1>
+          <p class="state__text">Redirecionando para Conexões...</p>
+        </div>
       }
     </section>
   `,
@@ -50,13 +54,17 @@ export class GoogleCallbackPageComponent {
 
       if (providerError) {
         this.isLoading.set(false);
-        this.errorMessage.set(`Autorização do Google falhou: ${providerError}`);
+        this.errorMessage.set(
+          providerError === 'access_denied'
+            ? 'A autorização foi cancelada no Google. Tente conectar de novo quando quiser.'
+            : `O Google recusou a autorização (${providerError}).`
+        );
         return;
       }
 
       if (!code || !state) {
         this.isLoading.set(false);
-        this.errorMessage.set('Callback do Google não contém code ou state.');
+        this.errorMessage.set('O retorno do Google veio incompleto. Inicie a conexão de novo em Conexões.');
         return;
       }
 

@@ -1,4 +1,5 @@
 import { AfterViewInit, ChangeDetectionStrategy, Component, OnDestroy, signal } from '@angular/core';
+import { PageHeaderComponent } from '../../shared/ui/page-header.component';
 
 type Lang = 'curl' | 'js' | 'python' | 'csharp';
 
@@ -12,14 +13,9 @@ interface TocItem {
 
 @Component({
   selector: 'sid3-docs-page',
-  imports: [],
+  imports: [PageHeaderComponent],
   template: `
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">Integração</p>
-        <h1>Documentação da API</h1>
-      </div>
-    </header>
+    <sid3-page-header title="Documentação da API" description="Como enviar, listar, baixar e excluir arquivos pelo SID3 com uma chave de API." />
 
     <div class="docs-layout">
 
@@ -27,7 +23,7 @@ interface TocItem {
       <div class="docs-main">
 
         <!-- URL base -->
-        <section id="url-base" class="panel">
+        <section id="url-base" class="card card__body doc-section">
           <header>
             <h2>URL base</h2>
             <p>
@@ -39,7 +35,7 @@ interface TocItem {
         </section>
 
         <!-- Início Rápido -->
-        <section id="quickstart" class="panel">
+        <section id="quickstart" class="card card__body doc-section">
           <header>
             <h2>Início Rápido</h2>
             <p>Quatro passos para começar a usar o SID3 como camada de armazenamento.</p>
@@ -55,7 +51,7 @@ interface TocItem {
             </li>
             <li>
               <strong>3. Crie um bucket e gere uma chave de API</strong>
-              <span>Em <em>Buckets</em>, crie um bucket e associe-o à conexão Google Drive. Em <em>Chaves de API</em>, gere um segredo — ele é exibido <strong>uma única vez</strong>.</span>
+              <span>Em <em>Armazenamento</em>, adicione a conta do Drive ao projeto e crie um bucket. Em <em>Chaves de API</em>, gere um segredo — ele é exibido <strong>uma única vez</strong>.</span>
             </li>
             <li>
               <strong>4. Faça o primeiro upload</strong>
@@ -65,7 +61,7 @@ interface TocItem {
         </section>
 
         <!-- Autenticação -->
-        <section id="autenticacao" class="panel">
+        <section id="autenticacao" class="card card__body doc-section">
           <header>
             <h2>Autenticação</h2>
             <p>
@@ -84,7 +80,7 @@ interface TocItem {
         </section>
 
         <!-- Listar buckets -->
-        <section id="listar-buckets" class="panel">
+        <section id="listar-buckets" class="card card__body doc-section">
           <header>
             <div class="endpoint-line">
               <span class="method get">GET</span>
@@ -97,9 +93,9 @@ interface TocItem {
             </p>
           </header>
 
-          <div class="lang-tabs">
+          <div class="tabs lang-tabs" role="tablist" aria-label="Linguagem do exemplo">
             @for (tab of tabs; track tab.id) {
-              <button type="button" [class.active]="lang('list-buckets') === tab.id" (click)="setLang('list-buckets', tab.id)">{{ tab.label }}</button>
+              <button type="button" role="tab" [attr.aria-selected]="lang('list-buckets') === tab.id" (click)="setLang('list-buckets', tab.id)">{{ tab.label }}</button>
             }
           </div>
 
@@ -153,7 +149,7 @@ var json = await resp.Content.ReadAsStringAsync();</code></pre>
         </section>
 
         <!-- Upload -->
-        <section id="upload" class="panel">
+        <section id="upload" class="card card__body doc-section">
           <header>
             <div class="endpoint-line">
               <span class="method post">POST</span>
@@ -163,9 +159,9 @@ var json = await resp.Content.ReadAsStringAsync();</code></pre>
             <p>Envia um arquivo via <code>multipart/form-data</code>. O campo <code>key</code> define o caminho virtual do arquivo (ex: <code>avatares/foto.png</code>).</p>
           </header>
 
-          <div class="lang-tabs">
+          <div class="tabs lang-tabs" role="tablist" aria-label="Linguagem do exemplo">
             @for (tab of tabs; track tab.id) {
-              <button type="button" [class.active]="lang('upload') === tab.id" (click)="setLang('upload', tab.id)">{{ tab.label }}</button>
+              <button type="button" role="tab" [attr.aria-selected]="lang('upload') === tab.id" (click)="setLang('upload', tab.id)">{{ tab.label }}</button>
             }
           </div>
 
@@ -231,7 +227,7 @@ var json = await resp.Content.ReadAsStringAsync();</code></pre>
         </section>
 
         <!-- Listar arquivos -->
-        <section id="listar-arquivos" class="panel">
+        <section id="listar-arquivos" class="card card__body doc-section">
           <header>
             <div class="endpoint-line">
               <span class="method get">GET</span>
@@ -244,9 +240,9 @@ var json = await resp.Content.ReadAsStringAsync();</code></pre>
             </p>
           </header>
 
-          <div class="lang-tabs">
+          <div class="tabs lang-tabs" role="tablist" aria-label="Linguagem do exemplo">
             @for (tab of tabs; track tab.id) {
-              <button type="button" [class.active]="lang('list') === tab.id" (click)="setLang('list', tab.id)">{{ tab.label }}</button>
+              <button type="button" role="tab" [attr.aria-selected]="lang('list') === tab.id" (click)="setLang('list', tab.id)">{{ tab.label }}</button>
             }
           </div>
 
@@ -299,7 +295,7 @@ var json = await resp.Content.ReadAsStringAsync();</code></pre>
         </section>
 
         <!-- Download -->
-        <section id="download" class="panel">
+        <section id="download" class="card card__body doc-section">
           <header>
             <div class="endpoint-line">
               <span class="method get">GET</span>
@@ -309,9 +305,9 @@ var json = await resp.Content.ReadAsStringAsync();</code></pre>
             <p>Retorna o conteúdo binário do arquivo com os headers <code>Content-Type</code> e <code>Content-Disposition</code> corretos. O <code>OBJECT_ID</code> é retornado no campo <code>"id"</code> do upload.</p>
           </header>
 
-          <div class="lang-tabs">
+          <div class="tabs lang-tabs" role="tablist" aria-label="Linguagem do exemplo">
             @for (tab of tabs; track tab.id) {
-              <button type="button" [class.active]="lang('download') === tab.id" (click)="setLang('download', tab.id)">{{ tab.label }}</button>
+              <button type="button" role="tab" [attr.aria-selected]="lang('download') === tab.id" (click)="setLang('download', tab.id)">{{ tab.label }}</button>
             }
           </div>
 
@@ -353,7 +349,7 @@ await File.WriteAllBytesAsync("arquivo-baixado.png", bytes);</code></pre>
         </section>
 
         <!-- Excluir -->
-        <section id="delete" class="panel">
+        <section id="delete" class="card card__body doc-section">
           <header>
             <div class="endpoint-line">
               <span class="method delete">DELETE</span>
@@ -363,9 +359,9 @@ await File.WriteAllBytesAsync("arquivo-baixado.png", bytes);</code></pre>
             <p>Remove o arquivo do bucket e do Google Drive. A operação é idempotente — excluir um arquivo já removido retorna sucesso.</p>
           </header>
 
-          <div class="lang-tabs">
+          <div class="tabs lang-tabs" role="tablist" aria-label="Linguagem do exemplo">
             @for (tab of tabs; track tab.id) {
-              <button type="button" [class.active]="lang('delete') === tab.id" (click)="setLang('delete', tab.id)">{{ tab.label }}</button>
+              <button type="button" role="tab" [attr.aria-selected]="lang('delete') === tab.id" (click)="setLang('delete', tab.id)">{{ tab.label }}</button>
             }
           </div>
 
@@ -405,7 +401,7 @@ await http.DeleteAsync(
         </section>
 
         <!-- Códigos de erro -->
-        <section id="erros" class="panel">
+        <section id="erros" class="card card__body doc-section">
           <header>
             <h2>Códigos de erro</h2>
             <p>Todas as respostas de erro seguem o formato <code>&#123; "message": "...", "statusCode": N &#125;</code>.</p>
@@ -449,7 +445,7 @@ await http.DeleteAsync(
         <p class="toc-title">Nesta página</p>
         <nav>
           @for (item of tocItems; track item.id) {
-            <a href="javascript:void(0)" [class.active]="activeSection() === item.id" (click)="scrollTo(item.id)">{{ item.label }}</a>
+            <a [attr.href]="'#' + item.id" [class.active]="activeSection() === item.id" [attr.aria-current]="activeSection() === item.id ? 'true' : null" (click)="$event.preventDefault(); scrollTo(item.id)">{{ item.label }}</a>
           }
         </nav>
       </aside>
@@ -457,65 +453,46 @@ await http.DeleteAsync(
     </div><!-- /docs-layout -->
   `,
   styles: [`
-    /* Layout */
-    .docs-layout { display: grid; grid-template-columns: 1fr 210px; gap: 40px; align-items: start; }
-    .docs-main { display: flex; flex-direction: column; gap: 20px; }
+    .docs-layout { align-items: start; display: grid; gap: var(--space-10); grid-template-columns: minmax(0, 1fr) 210px; }
+    .docs-main { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+    .doc-section { display: grid; gap: var(--space-4); scroll-margin-top: calc(var(--topbar-h) + var(--space-4)); }
+    .doc-section header { display: grid; gap: var(--space-2); }
+    .doc-section h2 { font-size: var(--text-lg); }
+    .doc-section p { color: var(--color-ink-2); max-width: 760px; }
+    .doc-section code:not(.code-block code) { background: var(--color-soft); border-radius: 4px; padding: 1px 5px; }
 
-    /* TOC */
-    .docs-toc { position: sticky; top: 24px; }
+    .docs-toc { position: sticky; top: calc(var(--topbar-h) + var(--space-4)); }
     .docs-toc nav { display: flex; flex-direction: column; gap: 1px; }
-    .toc-title { color: #394858; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 10px; }
-    .docs-toc a { color: #667586; font-size: 0.8125rem; padding: 5px 10px; border-radius: 4px; text-decoration: none; border-left: 2px solid transparent; display: block; line-height: 1.4; }
-    .docs-toc a:hover { color: #18202a; background: #f0f3f6; }
-    .docs-toc a.active { color: #146c5f; border-left-color: #146c5f; font-weight: 600; background: #f4fbf8; }
+    .toc-title { color: var(--color-muted); font-size: var(--text-xs); font-weight: var(--weight-medium); margin: 0 0 var(--space-2); }
+    .docs-toc a { border-left: 2px solid transparent; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--color-muted); display: block; font-size: var(--text-sm); line-height: 1.4; padding: 5px var(--space-3); text-decoration: none; transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out); }
+    .docs-toc a:hover { background: var(--color-soft); color: var(--color-ink); }
+    .docs-toc a.active { background: color-mix(in srgb, var(--color-accent) 8%, transparent); border-left-color: var(--color-accent); color: var(--color-accent-text); font-weight: var(--weight-medium); }
 
-    /* Method badges */
-    .endpoint-line { align-items: center; display: flex; gap: 8px; margin-bottom: 8px; }
-    .method { border-radius: 4px; font-size: 0.75rem; font-weight: 700; letter-spacing: .03em; padding: 3px 8px; text-transform: uppercase; }
-    .method.get { background: #e0f2fe; color: #0369a1; }
-    .method.post { background: #dcfce7; color: #15803d; }
-    .method.delete { background: #fee2e2; color: #b91c1c; }
-    .endpoint-path { background: #f0f3f6; border-radius: 4px; color: #18202a; font-size: 0.875rem; padding: 3px 8px; }
+    .endpoint-line { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .method { --_c: var(--color-info); background: color-mix(in srgb, var(--_c) 12%, transparent); border-radius: var(--radius-sm); color: var(--_c); font-family: var(--font-mono); font-size: var(--text-xs); font-weight: var(--weight-semibold); padding: 3px 8px; }
+    .method.post { --_c: var(--color-success); }
+    .method.delete { --_c: var(--color-danger); }
+    .endpoint-path { background: var(--color-soft); border-radius: var(--radius-sm); color: var(--color-ink); font-size: var(--text-sm); padding: 3px 8px; overflow-wrap: anywhere; }
 
-    /* Code */
-    .code-var { color: #e06c75; font-style: normal; }
-    .code-var-inline { color: #e06c75; }
-    .code-block {
-      background: #111820;
-      border-radius: 6px;
-      color: #d4dbe3;
-      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-      font-size: 0.8125rem;
-      line-height: 1.6;
-      margin: 0;
-      overflow-x: auto;
-      padding: 1rem 1.25rem;
-      white-space: pre;
-    }
+    .code-var { color: var(--color-code-var); font-style: normal; }
+    .code-var-inline { color: var(--color-danger); }
 
-    /* Lang tabs */
-    .lang-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
-    .lang-tabs button { padding: 0.25rem 0.75rem; border: 1px solid #dce3ea; background: #f0f3f6; color: #4f5e6d; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font: inherit; min-height: unset; }
-    .lang-tabs button.active { background: #146c5f; color: white; border-color: #146c5f; }
+    .lang-tabs { margin-bottom: calc(var(--space-1) * -1); }
 
-    /* Quickstart */
-    .quickstart-steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 1rem; }
-    .quickstart-steps li { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem 1rem; border-left: 3px solid #146c5f; background: #f4fbf8; border-radius: 0 4px 4px 0; }
-    .quickstart-steps strong { font-size: 0.9375rem; color: #18202a; }
-    .quickstart-steps span { color: #5f6f80; font-size: 0.875rem; }
+    .quickstart-steps { counter-reset: none; display: grid; gap: var(--space-3); list-style: none; margin: 0; padding: 0; }
+    .quickstart-steps li { background: var(--color-soft); border-left: 3px solid var(--color-accent); border-radius: 0 var(--radius-md) var(--radius-md) 0; display: grid; gap: var(--space-1); padding: var(--space-3) var(--space-4); }
+    .quickstart-steps strong { color: var(--color-ink); }
+    .quickstart-steps span { color: var(--color-ink-2); font-size: var(--text-sm); }
 
-    /* Response label */
-    .response-label { color: #5f6f80; font-size: 0.875rem; margin: 1rem 0 0.5rem; }
+    .response-label { color: var(--color-muted); font-size: var(--text-sm); margin: 0; }
 
-    /* Error table */
-    .error-table { border: 1px solid #e3e8ee; border-radius: 6px; overflow: hidden; }
-    .error-row { display: grid; grid-template-columns: 72px 1fr; }
-    .error-row span { border-top: 1px solid #e3e8ee; padding: 10px 14px; font-size: 0.875rem; color: #394858; }
-    .error-head span { background: #f0f3f6; border-top: none; color: #4f5e6d; font-weight: 700; font-size: 0.8125rem; }
+    .error-table { border: 1px solid var(--color-line); border-radius: var(--radius-md); overflow: hidden; }
+    .error-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); }
+    .error-row span { border-top: 1px solid var(--color-line); color: var(--color-ink-2); font-size: var(--text-sm); padding: var(--space-3) var(--space-4); }
+    .error-head span { background: var(--color-soft); border-top: 0; color: var(--color-muted); font-size: var(--text-xs); font-weight: var(--weight-medium); }
 
-    /* Mobile */
     @media (max-width: 1100px) {
-      .docs-layout { grid-template-columns: 1fr; }
+      .docs-layout { grid-template-columns: minmax(0, 1fr); }
       .docs-toc { display: none; }
     }
   `],
@@ -577,7 +554,8 @@ export class DocsPageComponent implements AfterViewInit, OnDestroy {
   }
 
   protected scrollTo(id: string): void {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     this.activeSection.set(id);
   }
 }

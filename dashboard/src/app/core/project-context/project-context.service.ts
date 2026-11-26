@@ -1,5 +1,6 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { Observable, finalize, tap } from 'rxjs';
+import { toApiErrorDetails, toApiErrorMessage } from '../api/api-error';
 import { Project } from '../../features/projects/project.models';
 import { ProjectsService } from '../../features/projects/projects.service';
 
@@ -16,6 +17,8 @@ export class ProjectContextService {
   readonly projects = signal<Project[]>([]);
   readonly isLoading = signal(false);
   readonly loaded = signal(false);
+  /** Falha ao carregar a lista de projetos (não confundir com "nenhum projeto"). */
+  readonly loadError = signal<{ message: string; details: string | null } | null>(null);
   private readonly selectedId = signal<string | null>(readStoredProjectId());
 
   /** Projeto atual (o salvo, ou o primeiro disponível). */
@@ -31,6 +34,7 @@ export class ProjectContextService {
     return this.projectsService.listProjects().pipe(
       tap((projects) => {
         this.projects.set(projects);
+        this.loadError.set(null);
         this.loaded.set(true);
       }),
       finalize(() => this.isLoading.set(false))
@@ -39,8 +43,19 @@ export class ProjectContextService {
 
   ensureLoaded(): void {
     if (!this.loaded() && !this.isLoading()) {
-      this.refresh().subscribe({ error: () => this.loaded.set(true) });
+      this.refresh().subscribe({ error: (error: unknown) => this.markFailed(error) });
     }
+  }
+
+  /** Tenta carregar de novo depois de uma falha. */
+  retry(): void {
+    if (this.isLoading()) return;
+    this.refresh().subscribe({ error: (error: unknown) => this.markFailed(error) });
+  }
+
+  private markFailed(error: unknown): void {
+    this.loadError.set({ message: toApiErrorMessage(error), details: toApiErrorDetails(error) });
+    this.loaded.set(true);
   }
 
   select(projectId: string): void {
@@ -66,6 +81,7 @@ export class ProjectContextService {
 
   clear(): void {
     this.projects.set([]);
+    this.loadError.set(null);
     this.loaded.set(false);
   }
 }

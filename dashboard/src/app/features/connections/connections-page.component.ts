@@ -1,220 +1,269 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { finalize } from 'rxjs';
-import { toApiErrorMessage } from '../../core/api/api-error';
+import { toApiErrorDetails, toApiErrorMessage } from '../../core/api/api-error';
+import { NotificationService } from '../../core/notifications/notification.service';
+import { ConfirmService } from '../../shared/ui/confirm.service';
+import { EmptyStateComponent } from '../../shared/ui/empty-state.component';
+import { ErrorStateComponent } from '../../shared/ui/error-state.component';
+import { connectionStatusLabel, connectionStatusTone, initials, plural } from '../../shared/ui/format';
+import { IconComponent } from '../../shared/ui/icon.component';
+import { MenuComponent } from '../../shared/ui/menu.component';
+import { ModalComponent } from '../../shared/ui/modal.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header.component';
+import { SkeletonComponent } from '../../shared/ui/skeleton.component';
+import { matchesQuery, TableSort } from '../../shared/ui/table-sort';
 import { Connection, DEFAULT_CONNECTION_DISPLAY_NAME, Sid3RootFolderDecision } from './connection.models';
 import { ConnectionsService } from './connections.service';
 
+type ConnectionSortKey = 'name' | 'status' | 'createdAt';
+
 @Component({
   selector: 'sid3-connections-page',
-  imports: [DatePipe],
+  imports: [
+    DatePipe,
+    EmptyStateComponent,
+    ErrorStateComponent,
+    IconComponent,
+    MenuComponent,
+    ModalComponent,
+    PageHeaderComponent,
+    SkeletonComponent
+  ],
   template: `
-    <header class="topbar">
-      <div>
-        <h1>Conexões</h1>
-        <p class="muted">
-          Contas do Google Drive conectadas ao SID3, independentes dos projetos. Para usar uma conta num projeto,
-          adicione-a em Armazenamento. A mesma conta pode estar em vários projetos.
-        </p>
-      </div>
-    </header>
+    <sid3-page-header
+      title="Conexões"
+      description="Contas do Google Drive conectadas ao SID3. Para usar uma conta num projeto, adicione-a em Armazenamento; a mesma conta pode estar em vários projetos."
+    >
+      <button class="btn btn--primary" type="button" [disabled]="isConnecting()" (click)="openConnectDialog()">
+        <sid3-icon name="plus" />Conectar Google Drive
+      </button>
+    </sid3-page-header>
 
-    @if (errorMessage()) {
-      <p class="form-error">{{ errorMessage() }}</p>
-    }
-
-    <section class="panel">
-      <header class="panel-header-row">
-        <h2>Contas Google Drive conectadas</h2>
-        <button type="button" [disabled]="isConnecting()" (click)="openConnectDialog()">
-          {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
-        </button>
-      </header>
-
-      @if (isLoading()) {
-        <p class="muted">Carregando conexões...</p>
+    <section class="card">
+      @if (isLoading() && connections().length === 0) {
+        <sid3-skeleton [count]="3" label="Carregando conexões" />
+      } @else if (loadError(); as failure) {
+        <sid3-error-state
+          title="Não foi possível carregar as conexões"
+          [message]="failure.message"
+          [details]="failure.details"
+          [busy]="isLoading()"
+          (retry)="loadConnections()"
+        />
       } @else if (connections().length === 0) {
-        <div class="empty-cta">
-          <p class="muted">Nenhuma conta conectada ainda.</p>
-          <button type="button" [disabled]="isConnecting()" (click)="openConnectDialog()">
-            {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
-          </button>
-        </div>
+        <sid3-empty-state
+          icon="plug"
+          title="Nenhuma conta conectada"
+          description="Conecte uma conta do Google Drive para começar a guardar arquivos pelo SID3."
+        >
+          <button class="btn btn--primary" type="button" (click)="openConnectDialog()"><sid3-icon name="plus" />Conectar Google Drive</button>
+        </sid3-empty-state>
       } @else {
-        <div class="table connection-table" role="table" aria-label="Conexões de provedor">
-          <div role="row" class="head">
-            <span role="columnheader">Nome</span>
-            <span role="columnheader">Conta Google</span>
-            <span role="columnheader">Projetos</span>
-            <span role="columnheader">Status</span>
-            <span role="columnheader">Criado em</span>
-            <span role="columnheader">Ação</span>
+        <div class="toolbar">
+          <div class="toolbar__group">
+            <label class="input-icon toolbar__search">
+              <span class="sr-only">Buscar conexão</span>
+              <sid3-icon name="search" />
+              <input class="input input--sm" type="search" placeholder="Buscar por nome ou e-mail" [value]="query()" (input)="query.set($any($event.target).value)" />
+            </label>
+            @if (attentionCount() > 0) {
+              <button class="filter-chip" type="button" [attr.aria-pressed]="onlyAttention()" (click)="onlyAttention.set(!onlyAttention())">
+                <sid3-icon name="alert" size="sm" />Precisam de atenção ({{ attentionCount() }})
+              </button>
+            }
           </div>
-          @for (connection of connections(); track connection.id) {
-            <div role="row">
-              <span role="cell">
-                @if (editingId() === connection.id) {
-                  <input
-                    type="text"
-                    [value]="editingName()"
-                    (input)="editingName.set($any($event.target).value)"
-                    (blur)="saveDisplayName(connection)"
-                    (keydown.enter)="saveDisplayName(connection)"
-                    (keydown.escape)="cancelEdit()"
-                    class="inline-edit"
-                  />
-                } @else {
-                  <span (dblclick)="startEdit(connection)" title="Duplo clique para renomear">
-                    {{ connection.displayName ?? connection.provider }}
-                  </span>
-                }
-              </span>
-              <span role="cell">{{ connection.providerAccountEmail ?? '—' }}</span>
-              <span role="cell">
-                @if (connection.projects.length === 0) {
-                  <span class="muted">Nenhum</span>
-                } @else {
-                  {{ projectNames(connection) }}
-                }
-              </span>
-              <span role="cell">
-                <span [class]="'status-label ' + connection.status.toLowerCase()">
-                  {{ connection.status === 'CONNECTED' ? 'Conectado' : connection.status === 'REVOKED' ? 'Revogado' : 'Erro' }}
-                </span>
-                @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
-                  <span class="status-label pending_confirmation">Pasta sid3 pendente</span>
-                }
-                @if (connection.status === 'ERROR' && connection.lastError) {
-                  <span class="field-hint field-hint--error">{{ errorLabel(connection.lastError) }}</span>
-                }
-              </span>
-              <span role="cell">{{ connection.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
-              <span role="cell" class="action-cell">
-                @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
-                  <button
-                    class="compact-button"
-                    type="button"
-                    (click)="openSid3RootDialog(connection)"
-                  >
-                    Resolver pasta sid3
-                  </button>
-                }
-                <button
-                  class="compact-button"
-                  type="button"
-                  [disabled]="reauthorizingId() === connection.id"
-                  (click)="reauthorize(connection)"
-                >
-                  {{ reauthorizingId() === connection.id ? 'Redirecionando...' : 'Reconectar' }}
-                </button>
-                @if (connection.status !== 'REVOKED') {
-                  <button class="secondary compact-button" type="button" (click)="revoke(connection)">Revogar</button>
-                }
-                <button class="danger compact-button" type="button" (click)="deleteConnection(connection)">Excluir</button>
-              </span>
-            </div>
-          }
+          <span class="muted text-sm">{{ plural(connections().length, 'conta', 'contas') }}</span>
+        </div>
+        <div class="table-wrap">
+          <table class="table table--responsive">
+            <thead>
+              <tr>
+                <th [attr.aria-sort]="sort.aria('name')">
+                  <button class="sort-btn" type="button" (click)="sort.toggle('name')">Conta <sid3-icon [name]="sort.icon('name')" size="sm" /></button>
+                </th>
+                <th>Projetos</th>
+                <th [attr.aria-sort]="sort.aria('status')">
+                  <button class="sort-btn" type="button" (click)="sort.toggle('status')">Status <sid3-icon [name]="sort.icon('status')" size="sm" /></button>
+                </th>
+                <th [attr.aria-sort]="sort.aria('createdAt')">
+                  <button class="sort-btn" type="button" (click)="sort.toggle('createdAt')">Conectada em <sid3-icon [name]="sort.icon('createdAt')" size="sm" /></button>
+                </th>
+                <th class="col-actions"><span class="sr-only">Ações</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (connection of visibleConnections(); track connection.id) {
+                <tr>
+                  <td class="cell-primary">
+                    <div class="cluster" style="flex-wrap: nowrap">
+                      <span class="row-item__avatar" aria-hidden="true">{{ initials(connection.displayName ?? connection.providerAccountEmail) }}</span>
+                      @if (editingId() === connection.id) {
+                        <form class="input-group" style="max-width: 280px" (submit)="$event.preventDefault(); saveDisplayName(connection)">
+                          <input
+                            class="input input--sm"
+                            type="text"
+                            maxlength="100"
+                            aria-label="Novo nome da conexão"
+                            data-autofocus
+                            [value]="editingName()"
+                            (input)="editingName.set($any($event.target).value)"
+                            (keydown.escape)="cancelEdit()"
+                          />
+                          <button class="btn btn--sm btn--icon" type="submit" aria-label="Salvar nome"><sid3-icon name="check" /></button>
+                          <button class="btn btn--sm btn--icon" type="button" aria-label="Cancelar" (click)="cancelEdit()"><sid3-icon name="x" /></button>
+                        </form>
+                      } @else {
+                        <div class="cell-main">
+                          <strong class="truncate">{{ connection.displayName ?? 'Google Drive' }}</strong>
+                          <span class="truncate">{{ connection.providerAccountEmail ?? 'Conta ainda não identificada' }}</span>
+                        </div>
+                      }
+                    </div>
+                  </td>
+                  <td data-label="Projetos">
+                    @if (connection.projects.length === 0) {
+                      <span class="muted">Nenhum</span>
+                    } @else {
+                      <span [title]="projectNames(connection)">{{ projectNames(connection) }}</span>
+                    }
+                  </td>
+                  <td data-label="Status">
+                    <div class="stack-sm" style="gap: 4px; justify-items: start">
+                      <div class="cluster" style="gap: 4px">
+                        <span [class]="'chip chip--' + statusTone(connection.status)">{{ statusLabel(connection.status) }}</span>
+                        @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
+                          <span class="chip chip--warn">Pasta sid3 pendente</span>
+                        }
+                      </div>
+                      @if (connection.status === 'ERROR' && connection.lastError) {
+                        <span class="text-xs text-danger">{{ errorLabel(connection.lastError) }}</span>
+                      }
+                    </div>
+                  </td>
+                  <td class="col-date" data-label="Conectada em">{{ connection.createdAt | date: 'dd/MM/yyyy' }}</td>
+                  <td class="col-actions">
+                    <div class="cell-actions">
+                      @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
+                        <button class="btn btn--sm" type="button" (click)="openSid3RootDialog(connection)">Resolver pasta</button>
+                      } @else if (connection.status !== 'CONNECTED') {
+                        <button class="btn btn--sm" type="button" [disabled]="reauthorizingId() === connection.id" (click)="reauthorize(connection)">
+                          <sid3-icon name="refresh" [spin]="reauthorizingId() === connection.id" />
+                          {{ reauthorizingId() === connection.id ? 'Redirecionando...' : 'Reconectar' }}
+                        </button>
+                      }
+                      <sid3-menu [label]="'Ações de ' + (connection.displayName ?? 'Google Drive')">
+                        <button class="menu-item" type="button" role="menuitem" (click)="startEdit(connection)"><sid3-icon name="pencil" />Renomear</button>
+                        @if (connection.status === 'CONNECTED') {
+                          <button class="menu-item" type="button" role="menuitem" (click)="reauthorize(connection)"><sid3-icon name="refresh" />Reconectar</button>
+                        }
+                        @if (connection.status !== 'REVOKED') {
+                          <button class="menu-item" type="button" role="menuitem" (click)="revoke(connection)"><sid3-icon name="ban" />Revogar acesso</button>
+                        }
+                        <hr class="menu-sep" />
+                        <button class="menu-item menu-item--danger" type="button" role="menuitem" (click)="deleteConnection(connection)">
+                          <sid3-icon name="trash" />Excluir conexão
+                        </button>
+                      </sid3-menu>
+                    </div>
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="5">
+                    <sid3-empty-state icon="search" title="Nenhuma conexão encontrada" description="Tente outro termo de busca." [compact]="true">
+                      <button class="btn btn--sm" type="button" (click)="query.set(''); onlyAttention.set(false)">Limpar filtros</button>
+                    </sid3-empty-state>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
         </div>
       }
     </section>
 
     @if (isConnectDialogOpen()) {
-      <div class="modal-overlay" role="presentation" (click)="closeConnectDialog()">
-        <form
-          class="modal-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="connect-dialog-title"
-          (click)="$event.stopPropagation()"
-          (submit)="$event.preventDefault(); connectGoogle()"
-        >
-          <h3 id="connect-dialog-title">Conectar Google Drive</h3>
-          <label>
-            Nome da conexão
-            <input
-              type="text"
-              maxlength="100"
-              autocomplete="off"
-              [value]="connectName()"
-              [placeholder]="defaultConnectionName"
-              (input)="connectName.set($any($event.target).value)"
-              (keydown.escape)="closeConnectDialog()"
-            />
-          </label>
-          <p class="muted">
-            Use um nome que identifique a conta (ex.: "Drive pessoal"). Em branco, fica {{ defaultConnectionName }}.
-            Você será levado ao Google para escolher a conta.
-          </p>
-          <div class="modal-actions">
-            <button
-              class="secondary compact-button"
-              type="button"
-              [disabled]="isConnecting()"
-              (click)="closeConnectDialog()"
-            >
-              Cancelar
-            </button>
-            <button class="compact-button" type="submit" [disabled]="isConnecting()">
-              {{ isConnecting() ? 'Redirecionando...' : 'Continuar no Google' }}
-            </button>
-          </div>
+      <sid3-modal
+        title="Conectar Google Drive"
+        subtitle="Você será levado ao Google para escolher a conta."
+        icon="plug"
+        [dismissable]="!isConnecting()"
+        (closed)="closeConnectDialog()"
+      >
+        <form id="connect-form" class="field" (submit)="$event.preventDefault(); connectGoogle()">
+          <label class="field__label" for="connect-name">Nome da conexão</label>
+          <input
+            id="connect-name"
+            class="input"
+            type="text"
+            maxlength="100"
+            autocomplete="off"
+            data-autofocus
+            [value]="connectName()"
+            [placeholder]="defaultConnectionName"
+            (input)="connectName.set($any($event.target).value)"
+            aria-describedby="connect-name-hint"
+          />
+          <span class="field__hint" id="connect-name-hint">Um nome que identifique a conta, como "Drive pessoal". Em branco, fica {{ defaultConnectionName }}.</span>
         </form>
-      </div>
+        <footer modal-footer class="modal__footer">
+          <button class="btn" type="button" [disabled]="isConnecting()" (click)="closeConnectDialog()">Cancelar</button>
+          <button class="btn btn--primary" type="submit" form="connect-form" [disabled]="isConnecting()">
+            @if (isConnecting()) {
+              <sid3-icon name="loader" [spin]="true" />Redirecionando...
+            } @else {
+              Continuar no Google<sid3-icon name="external" />
+            }
+          </button>
+        </footer>
+      </sid3-modal>
     }
 
     @if (sid3RootDialogConnection(); as connection) {
-      <div class="modal-overlay" role="presentation" (click)="closeSid3RootDialog()">
-        <div
-          class="modal-panel"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="sid3-root-dialog-title"
-          (click)="$event.stopPropagation()"
-        >
-          <h3 id="sid3-root-dialog-title">Pasta "sid3" já existe neste Google Drive</h3>
-          <p>
-            Encontramos uma pasta chamada <strong>sid3</strong> na raiz da conta
-            <strong>{{ connection.providerAccountEmail ?? connection.displayName ?? 'conectada' }}</strong>,
-            que não foi criada pelo SID3. Você pode reutilizar essa pasta para os uploads desta conexão ou
-            recusar e deixar o SID3 criar uma pasta "sid3" nova e exclusiva.
-          </p>
-          @if (sid3RootDialogError()) {
-            <p class="form-error">{{ sid3RootDialogError() }}</p>
-          }
-          <div class="modal-actions">
-            <button
-              class="secondary compact-button"
-              type="button"
-              [disabled]="isResolvingSid3Root()"
-              (click)="closeSid3RootDialog()"
-            >
-              Cancelar
-            </button>
-            <button
-              class="danger compact-button"
-              type="button"
-              [disabled]="isResolvingSid3Root()"
-              (click)="resolveSid3Root(connection, 'DECLINE')"
-            >
-              {{ isResolvingSid3Root() ? 'Processando...' : 'Recusar e criar nova' }}
-            </button>
-            <button
-              class="compact-button"
-              type="button"
-              [disabled]="isResolvingSid3Root()"
-              (click)="resolveSid3Root(connection, 'CONFIRM')"
-            >
-              {{ isResolvingSid3Root() ? 'Processando...' : 'Confirmar uso desta pasta' }}
-            </button>
-          </div>
-        </div>
-      </div>
+      <sid3-modal
+        role="alertdialog"
+        title='Pasta "sid3" já existe neste Drive'
+        icon="folder"
+        [dismissable]="!isResolvingSid3Root()"
+        (closed)="closeSid3RootDialog()"
+      >
+        <p>
+          Encontramos uma pasta <strong>sid3</strong> na raiz da conta
+          <strong>{{ connection.providerAccountEmail ?? connection.displayName ?? 'conectada' }}</strong> que não foi criada pelo SID3.
+          Você pode reutilizá-la para os envios desta conexão ou deixar o SID3 criar uma pasta nova e exclusiva.
+        </p>
+        @if (sid3RootDialogError()) {
+          <div class="callout callout--danger" role="alert"><sid3-icon name="alert" /><span class="callout__text">{{ sid3RootDialogError() }}</span></div>
+        }
+        <footer modal-footer class="modal__footer">
+          <button class="btn" type="button" [disabled]="isResolvingSid3Root()" (click)="closeSid3RootDialog()">Cancelar</button>
+          <button class="btn" type="button" [disabled]="isResolvingSid3Root()" (click)="resolveSid3Root(connection, 'DECLINE')">Criar pasta nova</button>
+          <button class="btn btn--primary" type="button" [disabled]="isResolvingSid3Root()" (click)="resolveSid3Root(connection, 'CONFIRM')">
+            @if (isResolvingSid3Root()) {
+              <sid3-icon name="loader" [spin]="true" />
+            }
+            Usar esta pasta
+          </button>
+        </footer>
+      </sid3-modal>
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ConnectionsPageComponent {
   private readonly connectionsService = inject(ConnectionsService);
+  private readonly notifications = inject(NotificationService);
+  private readonly confirm = inject(ConfirmService);
+
+  protected readonly initials = initials;
+  protected readonly plural = plural;
+  protected readonly statusLabel = connectionStatusLabel;
+  protected readonly statusTone = connectionStatusTone;
+  protected readonly sort = new TableSort<ConnectionSortKey>('name');
+  protected readonly query = signal('');
+  protected readonly onlyAttention = signal(false);
+  protected readonly loadError = signal<{ message: string; details: string | null } | null>(null);
 
   protected readonly connections = signal<Connection[]>([]);
   protected readonly isLoading = signal(true);
@@ -223,19 +272,37 @@ export class ConnectionsPageComponent {
   protected readonly connectName = signal(DEFAULT_CONNECTION_DISPLAY_NAME);
   protected readonly defaultConnectionName = DEFAULT_CONNECTION_DISPLAY_NAME;
   protected readonly reauthorizingId = signal<string | null>(null);
-  protected readonly errorMessage = signal<string | null>(null);
   protected readonly editingId = signal<string | null>(null);
   protected readonly editingName = signal('');
   protected readonly sid3RootDialogConnection = signal<Connection | null>(null);
   protected readonly isResolvingSid3Root = signal(false);
   protected readonly sid3RootDialogError = signal<string | null>(null);
 
+  private readonly needsAttention = (connection: Connection): boolean =>
+    connection.status !== 'CONNECTED' || connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION';
+
+  protected readonly attentionCount = computed(() => this.connections().filter(this.needsAttention).length);
+
+  protected readonly visibleConnections = computed(() => {
+    const query = this.query();
+    const onlyAttention = this.onlyAttention();
+    const rows = this.connections().filter(
+      (connection) =>
+        (!onlyAttention || this.needsAttention(connection)) &&
+        matchesQuery(query, connection.displayName, connection.providerAccountEmail, this.projectNames(connection))
+    );
+    return this.sort.apply(rows, {
+      name: (connection) => connection.displayName ?? connection.providerAccountEmail,
+      status: (connection) => connectionStatusLabel(connection.status),
+      createdAt: (connection) => connection.createdAt
+    });
+  });
+
   constructor() {
     this.loadConnections();
   }
 
   openConnectDialog(): void {
-    this.errorMessage.set(null);
     this.connectName.set(DEFAULT_CONNECTION_DISPLAY_NAME);
     this.isConnectDialogOpen.set(true);
   }
@@ -249,7 +316,6 @@ export class ConnectionsPageComponent {
 
   connectGoogle(): void {
     const displayName = this.connectName().trim() || DEFAULT_CONNECTION_DISPLAY_NAME;
-    this.errorMessage.set(null);
     this.isConnecting.set(true);
     this.connectionsService
       .createGoogleAuthorizationUrl({ displayName })
@@ -260,7 +326,7 @@ export class ConnectionsPageComponent {
         },
         error: (error: unknown) => {
           this.isConnectDialogOpen.set(false);
-          this.errorMessage.set(toApiErrorMessage(error));
+          this.notifications.error(toApiErrorMessage(error));
         }
       });
   }
@@ -287,13 +353,13 @@ export class ConnectionsPageComponent {
     this.connectionsService.updateConnection(connection.id, { displayName: name }).subscribe({
       next: (updated) => {
         this.connections.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+        this.notifications.success('Nome da conexão atualizado.');
       },
-      error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+      error: (error: unknown) => this.notifications.error(toApiErrorMessage(error))
     });
   }
 
   reauthorize(connection: Connection): void {
-    this.errorMessage.set(null);
     this.reauthorizingId.set(connection.id);
     this.connectionsService
       .reauthorizeConnection(connection.id)
@@ -302,25 +368,27 @@ export class ConnectionsPageComponent {
         next: (response) => {
           window.location.assign(response.authorizationUrl);
         },
-        error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+        error: (error: unknown) => this.notifications.error(toApiErrorMessage(error))
       });
   }
 
-  revoke(connection: Connection): void {
+  async revoke(connection: Connection): Promise<void> {
     const name = connection.displayName ?? connection.provider;
-    if (
-      !window.confirm(
-        `Revogar a conexão "${name}"? O acesso do SID3 é cancelado no Google e os buckets e arquivos desta conta ficam inacessíveis até reconectar.`
-      )
-    ) {
+    const confirmed = await this.confirm.ask({
+      title: `Revogar o acesso de "${name}"?`,
+      message:
+        'O acesso do SID3 é cancelado no Google. Os buckets e arquivos desta conta ficam inacessíveis até você reconectar.',
+      confirmLabel: 'Revogar acesso'
+    });
+    if (!confirmed) {
       return;
     }
-    this.errorMessage.set(null);
     this.connectionsService.revokeConnection(connection.id).subscribe({
       next: (updated) => {
         this.connections.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+        this.notifications.success(`Acesso de "${name}" revogado.`);
       },
-      error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+      error: (error: unknown) => this.notifications.error(toApiErrorMessage(error))
     });
   }
 
@@ -334,15 +402,22 @@ export class ConnectionsPageComponent {
     return code;
   }
 
-  deleteConnection(connection: Connection): void {
+  async deleteConnection(connection: Connection): Promise<void> {
     const name = connection.displayName ?? connection.provider;
-    if (!window.confirm(`Excluir a conexão "${name}"? Só é possível quando nenhum bucket, pool ou arquivo depende dela.`)) {
+    const confirmed = await this.confirm.ask({
+      title: `Excluir a conexão "${name}"?`,
+      message: 'Só é possível quando nenhum bucket, pool ou arquivo depende dela. Essa ação não pode ser desfeita.',
+      confirmLabel: 'Excluir conexão'
+    });
+    if (!confirmed) {
       return;
     }
-    this.errorMessage.set(null);
     this.connectionsService.deleteConnection(connection.id).subscribe({
-      next: () => this.connections.update((items) => items.filter((item) => item.id !== connection.id)),
-      error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+      next: () => {
+        this.connections.update((items) => items.filter((item) => item.id !== connection.id));
+        this.notifications.success(`Conexão "${name}" excluída.`);
+      },
+      error: (error: unknown) => this.notifications.error(toApiErrorMessage(error))
     });
   }
 
@@ -369,19 +444,21 @@ export class ConnectionsPageComponent {
         next: (updated) => {
           this.connections.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           this.sid3RootDialogConnection.set(null);
+          this.notifications.success(decision === 'CONFIRM' ? 'Pasta sid3 confirmada.' : 'O SID3 vai criar uma pasta sid3 nova.');
         },
         error: (error: unknown) => this.sid3RootDialogError.set(toApiErrorMessage(error))
       });
   }
 
-  private loadConnections(): void {
+  loadConnections(): void {
     this.isLoading.set(true);
+    this.loadError.set(null);
     this.connectionsService
       .listConnections()
       .pipe(finalize(() => this.isLoading.set(false)))
       .subscribe({
         next: (connections) => this.connections.set(connections),
-        error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+        error: (error: unknown) => this.loadError.set({ message: toApiErrorMessage(error), details: toApiErrorDetails(error) })
       });
   }
 }
