@@ -1,7 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { catchError, combineLatest, filter, finalize, forkJoin, of, switchMap, tap } from 'rxjs';
-import { toApiErrorMessage } from '../../core/api/api-error';
+import { toApiErrorDetails, toApiErrorMessage } from '../../core/api/api-error';
+import { ErrorStateComponent } from '../../shared/ui/error-state.component';
+import { IconComponent } from '../../shared/ui/icon.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header.component';
+import { SkeletonComponent } from '../../shared/ui/skeleton.component';
 import { ProjectContextService } from '../../core/project-context/project-context.service';
 import { NoProjectStateComponent } from '../../shared/ui/no-project-state.component';
 import { Bucket } from '../buckets/bucket.models';
@@ -19,25 +23,33 @@ import { ProjectConnectionsSectionComponent } from './project-connections-sectio
 /** Onde os arquivos do projeto ficam: contas do Drive do projeto, buckets e pools, numa tela só. */
 @Component({
   selector: 'sid3-storage-page',
-  imports: [NoProjectStateComponent, ProjectConnectionsSectionComponent, BucketsSectionComponent, PoolsSectionComponent],
+  imports: [NoProjectStateComponent, ProjectConnectionsSectionComponent, BucketsSectionComponent, PoolsSectionComponent, ErrorStateComponent, IconComponent, PageHeaderComponent, SkeletonComponent],
   template: `
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">{{ projectContext.currentProject()?.name ?? 'Projeto' }}</p>
-        <h1>Armazenamento</h1>
-      </div>
-    </header>
+    <sid3-page-header
+      title="Armazenamento"
+      description="Contas do Google Drive que este projeto usa, os buckets onde os arquivos ficam e, se precisar, pools que distribuem envios."
+    />
 
     @if (projectContext.loaded() && !projectContext.currentProjectId()) {
       <sid3-no-project-state />
     } @else if (projectContext.currentProjectId(); as projectId) {
-      @if (errorMessage()) {
-        <p class="form-error">{{ errorMessage() }}</p>
-      }
       @if (isLoading() && !loadedOnce()) {
-        <p class="muted">Carregando...</p>
-      } @else {
         <div class="stack">
+          <section class="card"><sid3-skeleton [count]="2" /></section>
+          <section class="card"><sid3-skeleton [count]="3" /></section>
+        </div>
+      } @else if (errorMessage() && !loadedOnce()) {
+        <section class="card">
+          <sid3-error-state title="Não foi possível carregar o armazenamento" [message]="errorMessage()!" [details]="errorDetails()" [busy]="isLoading()" (retry)="reload()" />
+        </section>
+      } @else {
+        @if (errorMessage()) {
+          <div class="callout callout--danger" role="alert">
+            <sid3-icon name="alert" /><span class="callout__text">Não foi possível atualizar. Estes são os últimos dados carregados.</span>
+            <button class="btn btn--sm" type="button" (click)="reload()">Tentar novamente</button>
+          </div>
+        }
+        <div class="stack" [style.opacity]="isLoading() ? 0.7 : 1">
           <sid3-project-connections-section
             [projectId]="projectId"
             [linked]="projectConnections()"
@@ -51,12 +63,7 @@ import { ProjectConnectionsSectionComponent } from './project-connections-sectio
             [pools]="pools()"
             (changed)="reload()"
           />
-          <sid3-pools-section
-            [projectId]="projectId"
-            [pools]="pools()"
-            [connections]="projectConnections()"
-            (changed)="reload()"
-          />
+          <sid3-pools-section [projectId]="projectId" [pools]="pools()" [connections]="projectConnections()" (changed)="reload()" />
         </div>
       }
     }
@@ -77,6 +84,7 @@ export class StoragePageComponent {
   protected readonly isLoading = signal(false);
   protected readonly loadedOnce = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly errorDetails = signal<string | null>(null);
   private readonly reloadTick = signal(0);
 
   constructor() {
@@ -111,6 +119,7 @@ export class StoragePageComponent {
       }),
       catchError((error: unknown) => {
         this.errorMessage.set(toApiErrorMessage(error));
+        this.errorDetails.set(toApiErrorDetails(error));
         return of(null);
       }),
       finalize(() => this.isLoading.set(false))

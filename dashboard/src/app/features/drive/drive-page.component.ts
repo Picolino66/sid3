@@ -22,6 +22,14 @@ import {
   toBlobApiErrorMessage
 } from './drive-file.presenter';
 import { CreateShareLinkDialogComponent, ShareableItem } from '../share-links/create-share-link-dialog.component';
+import { EmptyStateComponent } from '../../shared/ui/empty-state.component';
+import { ErrorStateComponent } from '../../shared/ui/error-state.component';
+import { IconComponent } from '../../shared/ui/icon.component';
+import { MenuComponent } from '../../shared/ui/menu.component';
+import { ModalComponent } from '../../shared/ui/modal.component';
+import { NoProjectStateComponent } from '../../shared/ui/no-project-state.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header.component';
+import { SkeletonComponent } from '../../shared/ui/skeleton.component';
 import { DriveFilesService } from './drive-files.service';
 import {
   DRIVE_ROOT,
@@ -55,255 +63,263 @@ type DrivePreview = {
 
 @Component({
   selector: 'sid3-drive-page',
-  imports: [CreateShareLinkDialogComponent, DatePipe, ReactiveFormsModule, RouterLink],
+  imports: [
+    CreateShareLinkDialogComponent,
+    DatePipe,
+    ReactiveFormsModule,
+    RouterLink,
+    EmptyStateComponent,
+    ErrorStateComponent,
+    IconComponent,
+    MenuComponent,
+    ModalComponent,
+    NoProjectStateComponent,
+    PageHeaderComponent,
+    SkeletonComponent
+  ],
   template: `
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">{{ projectContext.currentProject()?.name ?? 'Projeto' }}</p>
-        <h1>Meu Drive</h1>
-        <p class="muted">Todo o conteúdo das contas do Google Drive deste projeto.</p>
-      </div>
+    <sid3-page-header title="Meu Drive" description="Todo o conteúdo das contas do Google Drive deste projeto, para navegar, baixar e compartilhar.">
       @if (connections().length > 1) {
-        <label class="topbar-select">
-          Conta
-          <select [value]="selectedConnectionId()" (change)="selectConnection($any($event.target).value)">
+        <label class="cluster" style="gap: var(--space-2)">
+          <span class="muted text-sm">Conta</span>
+          <select class="select select--sm" style="width: auto; max-width: 240px" [value]="selectedConnectionId()" (change)="selectConnection($any($event.target).value)">
             @for (connection of connections(); track connection.id) {
-              <option [value]="connection.id">{{ connectionLabel(connection) }}</option>
+              <option [value]="connection.id" [selected]="connection.id === selectedConnectionId()">{{ connectionLabel(connection) }}</option>
             }
           </select>
         </label>
       }
-    </header>
-
-    @if (isLoadingConnections()) {
-      <p class="muted">Carregando conexões...</p>
-    } @else if (connections().length === 0) {
-      <section class="panel empty-cta">
-        <p class="muted">Nenhuma conta do Google Drive ativa neste projeto.</p>
-        <a class="button-link" routerLink="/storage">Adicionar conta ao projeto</a>
-      </section>
-    } @else {
       @if (status(); as indexStatus) {
-        @if (!indexStatus.hasReadScope) {
-          <div class="banner-warning drive-banner" role="alert">
-            <span>
-              Esta conexão só tem acesso aos arquivos enviados pelo SID3. Para indexar e baixar todo o Drive,
-              reconecte a conta e autorize a leitura.
+        <div class="cluster" style="gap: 0">
+          <button
+            class="btn btn--sm"
+            style="border-top-right-radius: 0; border-bottom-right-radius: 0"
+            type="button"
+            [disabled]="!indexStatus.hasReadScope || indexStatus.status === 'INDEXING' || isRequestingRefresh()"
+            (click)="refresh('incremental')"
+          >
+            <sid3-icon name="refresh" [spin]="indexStatus.status === 'INDEXING'" />{{ indexStatus.status === 'INDEXING' ? 'Atualizando...' : 'Atualizar' }}
+          </button>
+          <sid3-menu label="Mais opções de atualização" icon="chev-down" triggerClass="btn btn--sm btn--icon split-btn" [disabled]="!indexStatus.hasReadScope || indexStatus.status === 'INDEXING' || isRequestingRefresh()">
+            <button class="menu-item" type="button" role="menuitem" (click)="refresh('full')"><sid3-icon name="rotate" />Reindexar tudo</button>
+          </sid3-menu>
+        </div>
+      }
+    </sid3-page-header>
+
+    @if (projectContext.loaded() && !projectContext.currentProjectId()) {
+      <sid3-no-project-state />
+    } @else if (isLoadingConnections()) {
+      <section class="card"><sid3-skeleton [count]="6" label="Carregando contas" /></section>
+    } @else if (connections().length === 0) {
+      <section class="card">
+        @if (errorMessage()) {
+          <sid3-error-state title="Não foi possível carregar as contas" [message]="errorMessage()!" (retry)="reloadConnections()" />
+        } @else {
+          <sid3-empty-state icon="drive" title="Nenhuma conta do Google Drive ativa neste projeto" description="Adicione uma conta ao projeto para navegar pelo Drive dela.">
+            <a class="btn btn--primary" routerLink="/storage">Adicionar conta ao projeto</a>
+          </sid3-empty-state>
+        }
+      </section>
+    } @else if (status(); as indexStatus) {
+      @if (!indexStatus.hasReadScope) {
+        <div class="callout callout--warn" role="alert">
+          <sid3-icon name="alert" />
+          <span class="callout__text">Esta conexão só acessa os arquivos enviados pelo SID3. Para indexar e baixar todo o Drive, reconecte e autorize a leitura.</span>
+          <button class="btn btn--sm" type="button" [disabled]="isReauthorizing()" (click)="reauthorize()">
+            <sid3-icon [name]="isReauthorizing() ? 'loader' : 'refresh'" [spin]="isReauthorizing()" />
+            {{ isReauthorizing() ? 'Redirecionando...' : 'Reconectar com leitura' }}
+          </button>
+        </div>
+      }
+
+      <section class="card">
+        <div class="toolbar drive-head">
+          <div class="segmented" role="group" aria-label="Seções do Drive">
+            @for (location of sections; track location.id) {
+              <button type="button" [attr.aria-pressed]="!search() && currentSection() === location.section" (click)="openLocation(location.id)">
+                {{ location.label }}
+              </button>
+            }
+          </div>
+          <div class="drive-index" aria-live="polite">
+            @switch (indexStatus.status) {
+              @case ('INDEXING') {
+                <span class="chip chip--info chip--pulse">Indexando</span>
+                <span class="muted text-xs">{{ indexStatus.lastIndexedAt ? 'Aplicando mudanças do Drive' : 'Primeira varredura, pode levar alguns minutos' }}</span>
+              }
+              @case ('READY') {
+                <span class="chip chip--success">Indexado</span>
+                <span class="muted text-xs">{{ indexStatus.itemCount }} itens · {{ indexStatus.lastIndexedAt | date: 'dd/MM HH:mm' }}</span>
+              }
+              @case ('FAILED') {
+                <span class="chip chip--danger">Falha na indexação</span>
+                <span class="muted text-xs truncate" [title]="indexStatus.lastError ?? ''">{{ indexStatus.lastError }}</span>
+              }
+              @default {
+                <span class="chip chip--neutral">Não indexado</span>
+              }
+            }
+          </div>
+        </div>
+
+        <div class="toolbar" style="padding-top: 0">
+          <nav class="crumbs" aria-label="Caminho da pasta">
+            @if (search()) {
+              <span class="crumbs__item" aria-current="page">Resultados para "{{ search() }}"</span>
+            } @else {
+              <button class="crumbs__item" type="button" [attr.aria-current]="(listing()?.breadcrumb ?? []).length === 0 ? 'page' : null" (click)="openLocation(sectionRootId())">
+                {{ sectionLabel() }}
+              </button>
+              @for (crumb of listing()?.breadcrumb ?? []; track crumb.id; let last = $last) {
+                <sid3-icon class="crumbs__sep" name="chev" size="sm" />
+                <button class="crumbs__item" type="button" [attr.aria-current]="last ? 'page' : null" (click)="openLocation(crumb.id)">{{ crumb.name }}</button>
+              }
+            }
+          </nav>
+          <label class="input-icon toolbar__search">
+            <span class="sr-only">Buscar em todo o Drive</span>
+            <sid3-icon name="search" />
+            <input class="input input--sm" type="search" [formControl]="searchControl" placeholder="Buscar em todo o Drive" />
+          </label>
+        </div>
+
+        @if (selectedCount() > 0) {
+          <div class="bulk-bar" role="region" aria-label="Itens selecionados">
+            <span class="text-sm">
+              <strong>{{ selectedCount() }}</strong> {{ selectedCount() === 1 ? 'item selecionado' : 'itens selecionados' }}
+              <span class="muted">· a seleção continua ao trocar de pasta</span>
             </span>
-            <button class="compact-button" type="button" [disabled]="isReauthorizing()" (click)="reauthorize()">
-              {{ isReauthorizing() ? 'Redirecionando...' : 'Reconectar com leitura' }}
-            </button>
+            <div class="cluster">
+              <button class="btn btn--sm btn--ghost" type="button" (click)="clearSelection()">Limpar</button>
+              <button class="btn btn--sm btn--primary" type="button" [disabled]="selectedCount() > maxShareItems" (click)="isShareDialogOpen.set(true)">
+                <sid3-icon name="link" />Gerar link público
+              </button>
+            </div>
           </div>
         }
 
-        <section class="panel">
-          <header class="panel-header-row drive-index-bar">
-            <div class="drive-index-summary" aria-live="polite">
-              @switch (indexStatus.status) {
-                @case ('INDEXING') {
-                  <span class="status-label error">Indexando...</span>
-                  <span class="muted">
-                    {{ indexStatus.lastIndexedAt ? 'Aplicando mudanças do Drive.' : 'Primeira varredura; pode levar alguns minutos.' }}
-                  </span>
+        @if (isLoadingFiles() && !listing()) {
+          <sid3-skeleton [count]="8" label="Carregando arquivos" />
+        } @else if (errorMessage()) {
+          <sid3-error-state title="Não foi possível listar os arquivos" [message]="errorMessage()!" [compact]="true" (retry)="goToPage(page())" />
+        } @else if ((listing()?.items ?? []).length === 0) {
+          @if (indexStatus.status === 'NEVER_INDEXED') {
+            <sid3-empty-state icon="drive" title="O Drive ainda não foi indexado" description="Faça a primeira varredura para ver e buscar os arquivos aqui." [compact]="true">
+              <button class="btn btn--primary btn--sm" type="button" [disabled]="!indexStatus.hasReadScope || isRequestingRefresh()" (click)="refresh('incremental')">Indexar agora</button>
+            </sid3-empty-state>
+          } @else if (indexStatus.status === 'INDEXING' && !indexStatus.lastIndexedAt) {
+            <sid3-empty-state icon="loader" title="Indexando seu Drive" description="Os arquivos aparecem aqui assim que a varredura terminar." [compact]="true" />
+          } @else if (search()) {
+            <sid3-empty-state icon="search" title="Nenhum arquivo encontrado" description="Tente outro nome ou parte do nome." [compact]="true" />
+          } @else if (parentId() === sharedDrives) {
+            <sid3-empty-state icon="server" title="Nenhum drive compartilhado" description="Esta conta não participa de drives compartilhados." [compact]="true" />
+          } @else {
+            <sid3-empty-state icon="folder" title="Esta pasta está vazia" [compact]="true" />
+          }
+        } @else {
+          <div class="table-wrap" [attr.aria-busy]="isLoadingFiles()" [style.opacity]="isLoadingFiles() ? 0.6 : 1">
+            <table class="table table--responsive">
+              <thead>
+                <tr>
+                  <th class="col-check">
+                    <input
+                      class="checkbox"
+                      type="checkbox"
+                      aria-label="Selecionar todos desta página"
+                      [checked]="isPageFullySelected()"
+                      [indeterminate]="isPagePartiallySelected()"
+                      (change)="togglePageSelection($any($event.target).checked)"
+                    />
+                  </th>
+                  <th>Nome</th>
+                  <th>Tipo</th>
+                  <th class="num">Tamanho</th>
+                  <th>Modificado em</th>
+                  <th class="col-actions"><span class="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (file of listing()!.items; track file.id) {
+                  <tr [attr.aria-selected]="isSelected(file)">
+                    <td class="col-check">
+                      <input class="checkbox" type="checkbox" [attr.aria-label]="'Selecionar ' + file.name" [checked]="isSelected(file)" (change)="toggleSelection(file, $any($event.target).checked)" />
+                    </td>
+                    <td class="cell-primary">
+                      <div class="file-name">
+                        <sid3-icon [class]="'file-icon' + (file.isFolder ? ' is-folder' : '')" [name]="fileIcon(file)" />
+                        @if (file.isFolder) {
+                          <button class="btn btn--link truncate" type="button" style="color: var(--color-ink); font-weight: var(--weight-medium)" (click)="openLocation(file.id)">{{ file.name }}</button>
+                        } @else if (previewKind(file)) {
+                          <button class="btn btn--link truncate" type="button" style="color: var(--color-ink); font-weight: var(--weight-regular)" [title]="file.name" (click)="openPreview(file)">{{ file.name }}</button>
+                        } @else {
+                          <span class="truncate" [title]="file.name">{{ file.name }}</span>
+                        }
+                      </div>
+                    </td>
+                    <td data-label="Tipo" class="muted">{{ file.isSharedDrive ? 'Drive compartilhado' : typeLabel(file) }}</td>
+                    <td data-label="Tamanho" class="num muted">{{ file.isFolder ? '—' : bytes(file.sizeBytes) }}</td>
+                    <td data-label="Modificado em" class="col-date">{{ file.modifiedTime ? (file.modifiedTime | date: 'dd/MM/yyyy HH:mm') : '—' }}</td>
+                    <td class="col-actions">
+                      <div class="cell-actions">
+                        @if (downloadingId() === file.id) {
+                          <span class="chip chip--info chip--pulse">{{ file.isFolder ? 'Gerando ZIP' : 'Baixando' }}</span>
+                        } @else if (file.isFolder) {
+                          <button class="btn btn--ghost btn--sm btn--icon" type="button" data-tooltip="Baixar pasta (ZIP)" data-tooltip-pos="left" [attr.aria-label]="'Baixar ' + file.name + ' em ZIP'" (click)="download(file)">
+                            <sid3-icon name="archive" />
+                          </button>
+                        } @else if (file.downloadable) {
+                          <button class="btn btn--ghost btn--sm btn--icon" type="button" [attr.data-tooltip]="file.exportExtension ? 'Baixar como .' + file.exportExtension : 'Baixar'" data-tooltip-pos="left" [attr.aria-label]="'Baixar ' + file.name" (click)="download(file)">
+                            <sid3-icon name="download" />
+                          </button>
+                        }
+                        <sid3-menu [label]="'Ações de ' + file.name">
+                          @if (file.isFolder) {
+                            <button class="menu-item" type="button" role="menuitem" (click)="openLocation(file.id)"><sid3-icon name="folder" />Abrir pasta</button>
+                            <button class="menu-item" type="button" role="menuitem" [disabled]="downloadingId() === file.id" (click)="download(file)"><sid3-icon name="archive" />Baixar em ZIP</button>
+                          }
+                          @if (previewKind(file)) {
+                            <button class="menu-item" type="button" role="menuitem" (click)="openPreview(file)"><sid3-icon name="eye" />Visualizar</button>
+                          }
+                          @if (file.downloadable) {
+                            <button class="menu-item" type="button" role="menuitem" [disabled]="downloadingId() === file.id" (click)="download(file)">
+                              <sid3-icon name="download" />{{ file.exportExtension ? 'Baixar como .' + file.exportExtension : 'Baixar' }}
+                            </button>
+                          }
+                          <button class="menu-item" type="button" role="menuitem" (click)="toggleSelection(file, !isSelected(file))">
+                            <sid3-icon name="link" />{{ isSelected(file) ? 'Tirar da seleção' : 'Selecionar para compartilhar' }}
+                          </button>
+                          @if (file.webViewLink) {
+                            <hr class="menu-sep" />
+                            <a class="menu-item" role="menuitem" [href]="file.webViewLink" target="_blank" rel="noopener noreferrer"><sid3-icon name="external" />Abrir no Google Drive</a>
+                          }
+                        </sid3-menu>
+                      </div>
+                    </td>
+                  </tr>
                 }
-                @case ('READY') {
-                  <span class="status-label connected">Indexado</span>
-                  <span class="muted">
-                    {{ indexStatus.itemCount }} itens · atualizado em {{ indexStatus.lastIndexedAt | date: 'dd/MM/yyyy HH:mm' }}
-                  </span>
-                }
-                @case ('FAILED') {
-                  <span class="status-label revoked">Falha na indexação</span>
-                  <span class="muted">{{ indexStatus.lastError }}</span>
-                }
-                @default {
-                  <span class="status-label">Ainda não indexado</span>
-                }
-              }
-            </div>
-            <div class="action-cell">
-              <button
-                type="button"
-                [disabled]="!indexStatus.hasReadScope || indexStatus.status === 'INDEXING' || isRequestingRefresh()"
-                (click)="refresh('incremental')"
-              >
-                {{ indexStatus.status === 'INDEXING' ? 'Atualizando...' : 'Atualizar' }}
-              </button>
-              <button
-                class="secondary"
-                type="button"
-                title="Refaz a varredura completa do Drive"
-                [disabled]="!indexStatus.hasReadScope || indexStatus.status === 'INDEXING' || isRequestingRefresh()"
-                (click)="refresh('full')"
-              >
-                Reindexar tudo
-              </button>
-            </div>
-          </header>
-
-          <div class="drive-toolbar">
-            <div class="drive-locations">
-              <nav class="drive-sections" aria-label="Seções do Drive">
-                @for (location of sections; track location.id) {
-                  <button
-                    class="link-button"
-                    type="button"
-                    [class.current]="!search() && currentSection() === location.section"
-                    [attr.aria-current]="!search() && currentSection() === location.section ? 'page' : null"
-                    (click)="openLocation(location.id)"
-                  >
-                    {{ location.label }}
-                  </button>
-                }
-              </nav>
-              <nav class="drive-breadcrumb" aria-label="Caminho da pasta">
-                @if (search()) {
-                  <span>Resultados para "{{ search() }}"</span>
-                } @else if ((listing()?.breadcrumb ?? []).length > 0) {
-                  <button class="link-button" type="button" (click)="openLocation(sectionRootId())">{{ sectionLabel() }}</button>
-                  @for (crumb of listing()!.breadcrumb; track crumb.id) {
-                    <span aria-hidden="true">/</span>
-                    <button class="link-button" type="button" [class.current]="$last" (click)="openLocation(crumb.id)">
-                      {{ crumb.name }}
-                    </button>
-                  }
-                }
-              </nav>
-            </div>
-            <label class="inline-filter drive-search">
-              <span class="sr-only">Buscar por nome</span>
-              <input type="search" [formControl]="searchControl" placeholder="Buscar em todo o Drive..." />
-            </label>
+              </tbody>
+            </table>
           </div>
 
-          @if (errorMessage()) {
-            <p class="form-error">{{ errorMessage() }}</p>
-          }
-
-          @if (selectedCount() > 0) {
-            <div class="selection-bar" role="region" aria-label="Itens selecionados">
-              <span>
-                <strong>{{ selectedCount() }}</strong> {{ selectedCount() === 1 ? 'item selecionado' : 'itens selecionados' }}
-                <span class="muted">(a seleção é mantida ao trocar de pasta)</span>
-              </span>
-              <div class="action-cell">
-                <button class="secondary compact-button" type="button" (click)="clearSelection()">Limpar</button>
-                <button class="compact-button" type="button" [disabled]="selectedCount() > maxShareItems" (click)="isShareDialogOpen.set(true)">
-                  Gerar link público
-                </button>
-              </div>
-            </div>
-          }
-
-          @if (isLoadingFiles() && !listing()) {
-            <p class="muted">Carregando arquivos...</p>
-          } @else if ((listing()?.items ?? []).length === 0) {
-            <p class="empty-state">
-              @if (indexStatus.status === 'NEVER_INDEXED') {
-                O Drive ainda não foi indexado. Clique em "Atualizar" para fazer a primeira varredura.
-              } @else if (indexStatus.status === 'INDEXING' && !indexStatus.lastIndexedAt) {
-                Indexando seu Drive... os arquivos aparecem aqui ao terminar.
-              } @else if (search()) {
-                Nenhum arquivo encontrado.
-              } @else if (parentId() === sharedDrives) {
-                Esta conta não participa de nenhum drive compartilhado.
-              } @else {
-                Esta pasta está vazia.
-              }
-            </p>
-          } @else {
-            <div class="table drive-table" role="table" aria-label="Arquivos do Drive" [attr.aria-busy]="isLoadingFiles()">
-              <div role="row" class="head">
-                <span role="columnheader" class="select-cell">
-                  <input
-                    type="checkbox"
-                    aria-label="Selecionar todos desta página"
-                    [checked]="isPageFullySelected()"
-                    [indeterminate]="isPagePartiallySelected()"
-                    (change)="togglePageSelection($any($event.target).checked)"
-                  />
-                </span>
-                <span role="columnheader">Nome</span>
-                <span role="columnheader">Tipo</span>
-                <span role="columnheader">Tamanho</span>
-                <span role="columnheader">Modificado em</span>
-                <span role="columnheader">Ações</span>
-              </div>
-              @for (file of listing()!.items; track file.id) {
-                <div role="row" [class.selected]="isSelected(file)">
-                  <span role="cell" class="select-cell">
-                    <input
-                      type="checkbox"
-                      [attr.aria-label]="'Selecionar ' + file.name"
-                      [checked]="isSelected(file)"
-                      (change)="toggleSelection(file, $any($event.target).checked)"
-                    />
-                  </span>
-                  <span role="cell" class="drive-name-cell">
-                    @if (file.isFolder) {
-                      <button class="link-button" type="button" (click)="openLocation(file.id)">
-                        {{ file.isSharedDrive ? '🗄️' : '📁' }} {{ file.name }}
-                      </button>
-                    } @else {
-                      <span [title]="file.name">{{ file.name }}</span>
-                    }
-                  </span>
-                  <span role="cell">{{ file.isSharedDrive ? 'Drive compartilhado' : typeLabel(file) }}</span>
-                  <span role="cell">{{ file.isFolder ? '—' : bytes(file.sizeBytes) }}</span>
-                  <span role="cell">{{ file.modifiedTime ? (file.modifiedTime | date: 'dd/MM/yyyy HH:mm') : '—' }}</span>
-                  <span role="cell" class="action-cell">
-                    @if (file.isFolder) {
-                      <button
-                        class="compact-button secondary"
-                        type="button"
-                        [disabled]="downloadingId() === file.id"
-                        title="Baixar a pasta inteira (com subpastas) em ZIP"
-                        (click)="download(file)"
-                      >
-                        {{ downloadingId() === file.id ? 'Gerando ZIP...' : 'Baixar ZIP' }}
-                      </button>
-                    }
-                    @if (previewKind(file)) {
-                      <button class="compact-button secondary" type="button" (click)="openPreview(file)">Ver</button>
-                    }
-                    @if (file.downloadable) {
-                      <button
-                        class="compact-button"
-                        type="button"
-                        [disabled]="downloadingId() === file.id"
-                        [title]="file.exportExtension ? 'Baixa como .' + file.exportExtension : 'Baixar arquivo'"
-                        (click)="download(file)"
-                      >
-                        {{ downloadingId() === file.id ? 'Baixando...' : 'Baixar' }}
-                      </button>
-                    }
-                    @if (file.webViewLink) {
-                      <a class="compact-link" [href]="file.webViewLink" target="_blank" rel="noopener noreferrer">Abrir no Drive</a>
-                    }
-                  </span>
-                </div>
-              }
-            </div>
-
+          <div class="table-footer">
+            <span class="tabular">{{ rangeLabel() }}</span>
             @if (totalPages() > 1) {
-              <nav class="drive-pagination" aria-label="Paginação">
-                <button class="secondary compact-button" type="button" [disabled]="page() <= 1" (click)="goToPage(page() - 1)">
-                  Anterior
-                </button>
-                <span class="muted">Página {{ page() }} de {{ totalPages() }} · {{ listing()!.total }} itens</span>
-                <button
-                  class="secondary compact-button"
-                  type="button"
-                  [disabled]="page() >= totalPages()"
-                  (click)="goToPage(page() + 1)"
-                >
-                  Próxima
-                </button>
+              <nav class="cluster" aria-label="Paginação">
+                <button class="btn btn--sm btn--ghost" type="button" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"><sid3-icon name="chev-left" />Anterior</button>
+                <span class="tabular text-sm">Página {{ page() }} de {{ totalPages() }}</span>
+                <button class="btn btn--sm btn--ghost" type="button" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)">Próxima<sid3-icon name="chev" /></button>
               </nav>
             }
-          }
-        </section>
-      }
+          </div>
+        }
+      </section>
+    } @else if (errorMessage()) {
+      <section class="card">
+        <sid3-error-state title="Não foi possível carregar o status do Drive" [message]="errorMessage()!" (retry)="reloadConnections()" />
+      </section>
+    } @else {
+      <section class="card"><sid3-skeleton [count]="6" /></section>
     }
 
     @if (isShareDialogOpen() && selectedConnectionId()) {
@@ -316,42 +332,49 @@ type DrivePreview = {
     }
 
     @if (preview(); as current) {
-      <div class="modal-overlay" role="presentation" (click)="closePreview()">
-        <div
-          class="preview-modal-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="drive-preview-title"
-          (click)="$event.stopPropagation()"
-          (keydown.escape)="closePreview()"
-        >
-          <header>
-            <h3 id="drive-preview-title">{{ current.file.name }}</h3>
-            <p class="field-hint">{{ typeLabel(current.file) }} — {{ bytes(current.file.sizeBytes) }}</p>
-          </header>
-          <div class="preview-content">
-            @if (current.loading) {
-              <p class="muted">Carregando pré-visualização...</p>
-            } @else if (current.kind === 'text') {
-              <pre><code>{{ current.text }}</code></pre>
-            } @else if (current.kind === 'image' && current.objectUrl) {
-              <img [src]="current.safeUrl" [alt]="current.file.name" />
-            } @else if (current.kind === 'pdf' && current.safeUrl) {
-              <iframe [src]="current.safeUrl" [title]="current.file.name"></iframe>
-            } @else if (current.kind === 'video' && current.safeUrl) {
-              <video [src]="current.safeUrl" controls></video>
-            } @else if (current.kind === 'audio' && current.safeUrl) {
-              <audio [src]="current.safeUrl" controls></audio>
-            }
-          </div>
-          <div class="modal-actions">
-            <button class="secondary" type="button" (click)="closePreview()">Fechar</button>
-            <button type="button" (click)="download(current.file)">Baixar</button>
-          </div>
+      <sid3-modal size="lg" [title]="current.file.name" [subtitle]="typeLabel(current.file) + ' · ' + bytes(current.file.sizeBytes)" (closed)="closePreview()">
+        <div class="media-stage" [class.media-stage--light]="current.kind === 'text' || current.kind === 'pdf'">
+          @if (current.loading) {
+            <div class="state state--compact"><sid3-icon name="loader" size="lg" [spin]="true" /><p class="state__text">Carregando pré-visualização...</p></div>
+          } @else if (current.kind === 'text') {
+            <pre><code>{{ current.text }}</code></pre>
+          } @else if (current.kind === 'image' && current.objectUrl) {
+            <img [src]="current.safeUrl" [alt]="current.file.name" />
+          } @else if (current.kind === 'pdf' && current.safeUrl) {
+            <iframe [src]="current.safeUrl" [title]="current.file.name"></iframe>
+          } @else if (current.kind === 'video' && current.safeUrl) {
+            <video [src]="current.safeUrl" controls></video>
+          } @else if (current.kind === 'audio' && current.safeUrl) {
+            <audio [src]="current.safeUrl" controls></audio>
+          }
         </div>
-      </div>
+        <footer modal-footer class="modal__footer">
+          @if (current.file.webViewLink) {
+            <a class="btn btn--ghost" [href]="current.file.webViewLink" target="_blank" rel="noopener noreferrer"><sid3-icon name="external" />Abrir no Drive</a>
+          }
+          <button class="btn btn--primary" type="button" [disabled]="downloadingId() === current.file.id" (click)="download(current.file)">
+            <sid3-icon [name]="downloadingId() === current.file.id ? 'loader' : 'download'" [spin]="downloadingId() === current.file.id" />Baixar
+          </button>
+        </footer>
+      </sid3-modal>
     }
   `,
+  styles: [
+    `
+      :host ::ng-deep .split-btn { border-bottom-left-radius: 0; border-top-left-radius: 0; margin-left: -1px; }
+      .drive-head { padding-bottom: var(--space-3); }
+      .drive-index { align-items: center; display: flex; gap: var(--space-2); min-width: 0; }
+      .file-name { align-items: center; display: flex; gap: var(--space-2); min-width: 0; }
+      .file-name .btn--link { justify-content: flex-start; min-width: 0; }
+      .file-icon { color: var(--color-muted); }
+      .file-icon.is-folder { color: var(--color-accent-text); }
+      .table .col-actions .cell-actions { min-width: 72px; }
+      @media (max-width: 767px) {
+        .segmented { width: 100%; }
+        .segmented button { flex: 1; font-size: var(--text-xs); height: auto; justify-content: center; line-height: 1.2; min-height: 36px; padding: var(--space-1) var(--space-2); text-align: center; white-space: normal; }
+      }
+    `
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class DrivePageComponent {
@@ -448,6 +471,29 @@ export class DrivePageComponent {
 
   protected connectionLabel(connection: Connection): string {
     return connection.displayName ?? connection.providerAccountEmail ?? 'Google Drive';
+  }
+
+  protected fileIcon(file: DriveFile): string {
+    if (file.isSharedDrive) return 'server';
+    if (file.isFolder) return 'folder';
+    const kind = drivePreviewKind(file);
+    if (kind === 'image') return 'image';
+    if (kind === 'video') return 'video';
+    if (kind === 'audio') return 'music';
+    return 'file';
+  }
+
+  protected rangeLabel(): string {
+    const listing = this.listing();
+    if (!listing || listing.total === 0) return '';
+    const start = (this.page() - 1) * listing.pageSize + 1;
+    const end = Math.min(start + listing.items.length - 1, listing.total);
+    return `${start}–${end} de ${listing.total.toLocaleString('pt-BR')} itens`;
+  }
+
+  protected reloadConnections(): void {
+    this.errorMessage.set(null);
+    this.loadConnections(this.projectContext.currentProjectId());
   }
 
   protected typeLabel(file: DriveFile): string {

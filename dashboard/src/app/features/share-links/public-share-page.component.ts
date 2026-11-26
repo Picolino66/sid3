@@ -8,11 +8,15 @@ import { debounceTime, distinctUntilChanged, firstValueFrom, map, Subscription }
 import { toApiErrorMessage } from '../../core/api/api-error';
 import { formatBytes } from '../drive/drive-file.presenter';
 import { PublicMediaViewerComponent } from './public-media-viewer.component';
+import { EmptyStateComponent } from '../../shared/ui/empty-state.component';
+import { ErrorStateComponent } from '../../shared/ui/error-state.component';
+import { IconComponent } from '../../shared/ui/icon.component';
+import { SkeletonComponent } from '../../shared/ui/skeleton.component';
 import { PublicFolderList, PublicSearchItem, PublicSearchResult, PublicShare, PublicShareItem } from './share-link.models';
 import { ShareLinksService } from './share-links.service';
 
 const MIN_SEARCH_LENGTH = 2;
-const PREVIEW_ICONS: Record<string, string> = { image: '🖼️', video: '🎬', audio: '🎵' };
+const PREVIEW_ICONS: Record<string, string> = { image: 'image', video: 'video', audio: 'music' };
 
 /**
  * Página aberta por qualquer pessoa com o link (fora do login e do layout do dashboard).
@@ -20,15 +24,15 @@ const PREVIEW_ICONS: Record<string, string> = { image: '🖼️', video: '🎬',
  */
 @Component({
   selector: 'sid3-public-share-page',
-  imports: [DatePipe, ReactiveFormsModule, PublicMediaViewerComponent],
+  imports: [DatePipe, ReactiveFormsModule, PublicMediaViewerComponent, EmptyStateComponent, ErrorStateComponent, IconComponent, SkeletonComponent],
   template: `
-    <main class="public-share">
-      <header class="public-share-header">
-        <span class="brand-mark">S3</span>
-        <div>
-          <h1>{{ share()?.name ?? 'Arquivos compartilhados' }}</h1>
+    <main class="public">
+      <header class="public__header">
+        <span class="brand__mark" aria-hidden="true">S3</span>
+        <div style="min-width: 0">
+          <h1 class="page-header__title">{{ share()?.name ?? 'Arquivos compartilhados' }}</h1>
           @if (share(); as current) {
-            <p class="muted">
+            <p class="muted text-sm">
               @if (current.sharedBy) {
                 Compartilhado por {{ current.sharedBy }} ·
               }
@@ -42,136 +46,136 @@ const PREVIEW_ICONS: Record<string, string> = { image: '🖼️', video: '🎬',
       </header>
 
       @if (isLoading() && !share()) {
-        <p class="muted">Carregando...</p>
-      } @else if (fatalError()) {
-        <section class="panel empty-cta" role="alert">
-          <h2>{{ fatalError()!.title }}</h2>
-          <p class="muted">{{ fatalError()!.message }}</p>
+        <section class="card"><sid3-skeleton [count]="6" label="Carregando arquivos compartilhados" /></section>
+      } @else if (fatalError(); as failure) {
+        <section class="card">
+          <sid3-error-state [title]="failure.title" [message]="failure.message" icon="unlink" [retryable]="false" />
         </section>
       } @else if (share()) {
-        <section class="panel">
-          <div class="public-share-toolbar">
+        <section class="card">
+          <div class="toolbar">
             @if (search(); as result) {
-              <p class="public-search-summary" aria-live="polite">
+              <p class="text-sm" aria-live="polite">
                 {{ result.total }} {{ result.total === 1 ? 'resultado' : 'resultados' }} para “{{ result.query }}”
-                <button class="link-button" type="button" (click)="clearSearch()">Limpar busca</button>
+                <button class="btn btn--link btn--sm" type="button" style="margin-left: var(--space-2)" (click)="clearSearch()">Limpar busca</button>
               </p>
             } @else {
-              <nav class="drive-breadcrumb" aria-label="Caminho">
-                <button class="link-button" type="button" [class.current]="!folder()" (click)="openRoot()">Itens compartilhados</button>
-                @for (crumb of folder()?.breadcrumb ?? []; track crumb.id) {
-                  <span aria-hidden="true">/</span>
-                  <button class="link-button" type="button" [class.current]="$last" (click)="openFolder(crumb.id)">
-                    {{ crumb.name }}
-                  </button>
+              <nav class="crumbs" aria-label="Caminho">
+                <button class="crumbs__item" type="button" [attr.aria-current]="!folder() ? 'page' : null" (click)="openRoot()">Itens compartilhados</button>
+                @for (crumb of folder()?.breadcrumb ?? []; track crumb.id; let last = $last) {
+                  <sid3-icon class="crumbs__sep" name="chev" size="sm" />
+                  <button class="crumbs__item" type="button" [attr.aria-current]="last ? 'page' : null" (click)="openFolder(crumb.id)">{{ crumb.name }}</button>
                 }
               </nav>
             }
-            <div class="public-share-toolbar-actions">
-              <label class="inline-filter drive-search">
+            <div class="toolbar__group" style="flex: 1 1 320px; justify-content: flex-end">
+              <label class="input-icon toolbar__search">
                 <span class="sr-only">Buscar nas pastas e arquivos do link</span>
-                <input type="search" [formControl]="searchControl" placeholder="Buscar pastas e arquivos..." />
+                <sid3-icon name="search" />
+                <input class="input input--sm" type="search" [formControl]="searchControl" placeholder="Buscar pastas e arquivos" aria-describedby="public-search-hint" />
               </label>
               @if (!search()) {
                 @if (folder(); as current) {
-                  <a class="button-link compact-button" [href]="folderZipUrl(current.folder.id)" rel="nofollow">Baixar esta pasta (ZIP)</a>
+                  <a class="btn btn--sm btn--primary" [href]="folderZipUrl(current.folder.id)" rel="nofollow"><sid3-icon name="archive" />Baixar pasta (ZIP)</a>
                 } @else if (items().length > 0) {
-                  <a class="button-link compact-button" [href]="shareZipUrl()" rel="nofollow">Baixar tudo (ZIP)</a>
+                  <a class="btn btn--sm btn--primary" [href]="shareZipUrl()" rel="nofollow"><sid3-icon name="archive" />Baixar tudo (ZIP)</a>
                 }
               }
             </div>
           </div>
 
           @if (searchHint()) {
-            <p class="field-hint">{{ searchHint() }}</p>
+            <p class="field__hint" id="public-search-hint" style="padding: 0 var(--space-5) var(--space-3)">{{ searchHint() }}</p>
           }
           @if (errorMessage()) {
-            <p class="form-error">{{ errorMessage() }}</p>
+            <div style="padding: 0 var(--space-5) var(--space-3)">
+              <div class="callout callout--danger" role="alert"><sid3-icon name="alert" /><span class="callout__text">{{ errorMessage() }}</span></div>
+            </div>
           }
 
           @if (visibleItems().length === 0) {
-            <p class="empty-state">{{ emptyMessage() }}</p>
+            <sid3-empty-state [icon]="search() ? 'search' : 'folder'" [title]="emptyMessage()" [compact]="true" />
           } @else {
-            <div class="table public-share-table" role="table" aria-label="Itens compartilhados" [attr.aria-busy]="isLoading()">
-              <div role="row" class="head">
-                <span role="columnheader">Nome</span>
-                <span role="columnheader">Tamanho</span>
-                <span role="columnheader">{{ search() ? 'Local' : 'Modificado em' }}</span>
-                <span role="columnheader">Ação</span>
-              </div>
-              @for (item of visibleItems(); track item.id) {
-                <div role="row">
-                  <span role="cell" class="drive-name-cell">
-                    @if (item.isFolder) {
-                      <button class="link-button" type="button" (click)="openFolder(item.id)">
-                        {{ item.isSharedDrive ? '🗄️' : '📁' }} {{ item.name }}
-                      </button>
-                    } @else if (item.previewKind) {
-                      <button class="link-button" type="button" [title]="item.name" (click)="openPreview(item)">
-                        {{ icon(item) }} {{ item.name }}
-                      </button>
-                    } @else {
-                      <span [title]="item.name">📄 {{ item.name }}</span>
-                    }
-                  </span>
-                  <span role="cell">{{ item.isFolder ? '—' : bytes(item.sizeBytes) }}</span>
-                  @if (asSearchItem(item); as result) {
-                    <span role="cell" class="public-search-path">
-                      @if (result.parentId) {
-                        <button class="link-button" type="button" [title]="pathLabel(result)" (click)="openFolder(result.parentId)">
-                          {{ pathLabel(result) }}
-                        </button>
+            <div class="table-wrap" [attr.aria-busy]="isLoading()" [style.opacity]="isLoading() ? 0.6 : 1">
+              <table class="table table--responsive">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th class="num">Tamanho</th>
+                    <th>{{ search() ? 'Local' : 'Modificado em' }}</th>
+                    <th class="col-actions"><span class="sr-only">Ações</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (item of visibleItems(); track item.id) {
+                    <tr>
+                      <td class="cell-primary">
+                        <div class="file-name">
+                          <sid3-icon [class]="'file-icon' + (item.isFolder ? ' is-folder' : '')" [name]="icon(item)" />
+                          @if (item.isFolder) {
+                            <button class="btn btn--link truncate name-btn" type="button" (click)="openFolder(item.id)">{{ item.name }}</button>
+                          } @else if (item.previewKind) {
+                            <button class="btn btn--link truncate name-btn" type="button" [title]="item.name" (click)="openPreview(item)">{{ item.name }}</button>
+                          } @else {
+                            <span class="truncate" [title]="item.name">{{ item.name }}</span>
+                          }
+                        </div>
+                      </td>
+                      <td class="num muted" data-label="Tamanho">{{ item.isFolder ? '—' : bytes(item.sizeBytes) }}</td>
+                      @if (asSearchItem(item); as result) {
+                        <td data-label="Local">
+                          @if (result.parentId) {
+                            <button class="btn btn--link btn--sm truncate" style="max-width: 240px" type="button" [title]="pathLabel(result)" (click)="openFolder(result.parentId)">
+                              {{ pathLabel(result) }}
+                            </button>
+                          } @else {
+                            <span class="muted">Itens compartilhados</span>
+                          }
+                        </td>
                       } @else {
-                        <span class="muted">Itens compartilhados</span>
+                        <td class="col-date" data-label="Modificado em">{{ item.modifiedTime ? (item.modifiedTime | date: 'dd/MM/yyyy HH:mm') : '—' }}</td>
                       }
-                    </span>
-                  } @else {
-                    <span role="cell">{{ item.modifiedTime ? (item.modifiedTime | date: 'dd/MM/yyyy HH:mm') : '—' }}</span>
+                      <td class="col-actions">
+                        <div class="cell-actions">
+                          @if (item.isFolder) {
+                            <a class="btn btn--sm btn--ghost" [href]="folderZipUrl(item.id)" rel="nofollow" [attr.aria-label]="'Baixar ' + item.name + ' em ZIP'"><sid3-icon name="archive" />ZIP</a>
+                          } @else {
+                            @if (item.previewKind) {
+                              <button class="btn btn--sm btn--ghost" type="button" (click)="openPreview(item)">
+                                <sid3-icon [name]="item.previewKind === 'image' ? 'eye' : 'play'" />{{ item.previewKind === 'image' ? 'Ver' : 'Reproduzir' }}
+                              </button>
+                            }
+                            @if (item.downloadable) {
+                              <a class="btn btn--sm" [href]="downloadUrl(item)" [title]="item.exportExtension ? 'Baixa como .' + item.exportExtension : 'Baixar'" rel="nofollow">
+                                <sid3-icon name="download" />Baixar
+                              </a>
+                            } @else {
+                              <span class="muted text-sm">Indisponível</span>
+                            }
+                          }
+                        </div>
+                      </td>
+                    </tr>
                   }
-                  <span role="cell" class="action-cell">
-                    @if (item.isFolder) {
-                      <button class="secondary compact-button" type="button" (click)="openFolder(item.id)">Abrir</button>
-                      <a class="button-link compact-button" [href]="folderZipUrl(item.id)" rel="nofollow" title="Baixar a pasta inteira em ZIP">ZIP</a>
-                    } @else {
-                      @if (item.previewKind) {
-                        <button class="secondary compact-button" type="button" (click)="openPreview(item)">
-                          {{ item.previewKind === 'image' ? 'Ver' : 'Reproduzir' }}
-                        </button>
-                      }
-                      @if (item.downloadable) {
-                        <a
-                          class="button-link compact-button"
-                          [href]="downloadUrl(item)"
-                          [title]="item.exportExtension ? 'Baixa como .' + item.exportExtension : 'Baixar'"
-                          rel="nofollow"
-                        >
-                          Baixar
-                        </a>
-                      } @else {
-                        <span class="muted">Indisponível</span>
-                      }
-                    }
-                  </span>
-                </div>
-              }
+                </tbody>
+              </table>
             </div>
 
             @if (totalPages() > 1) {
-              <nav class="drive-pagination" aria-label="Paginação">
-                <button class="secondary compact-button" type="button" [disabled]="page() <= 1" (click)="goToPage(page() - 1)">
-                  Anterior
-                </button>
-                <span class="muted">Página {{ page() }} de {{ totalPages() }}</span>
-                <button class="secondary compact-button" type="button" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)">
-                  Próxima
-                </button>
-              </nav>
+              <div class="table-footer">
+                <span></span>
+                <nav class="cluster" aria-label="Paginação">
+                  <button class="btn btn--sm btn--ghost" type="button" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"><sid3-icon name="chev-left" />Anterior</button>
+                  <span class="tabular text-sm">Página {{ page() }} de {{ totalPages() }}</span>
+                  <button class="btn btn--sm btn--ghost" type="button" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)">Próxima<sid3-icon name="chev" /></button>
+                </nav>
+              </div>
             }
           }
         </section>
       }
 
-      <footer class="public-share-footer muted">Compartilhado via SID3</footer>
+      <footer class="public__footer">Compartilhado via SID3</footer>
     </main>
 
     @if (previewStartId(); as startId) {
@@ -185,6 +189,15 @@ const PREVIEW_ICONS: Record<string, string> = { image: '🖼️', video: '🎬',
       />
     }
   `,
+  styles: [
+    `
+      .file-name { align-items: center; display: flex; gap: var(--space-2); min-width: 0; }
+      .file-icon { color: var(--color-muted); }
+      .file-icon.is-folder { color: var(--color-accent-text); }
+      .name-btn { color: var(--color-ink); font-weight: var(--weight-regular); justify-content: flex-start; min-width: 0; }
+      .name-btn:hover { color: var(--color-accent-text); }
+    `
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class PublicSharePageComponent implements OnInit {
@@ -265,7 +278,9 @@ export class PublicSharePageComponent implements OnInit {
   }
 
   protected icon(item: PublicShareItem): string {
-    return (item.previewKind && PREVIEW_ICONS[item.previewKind]) ?? '📄';
+    if (item.isSharedDrive) return 'server';
+    if (item.isFolder) return 'folder';
+    return (item.previewKind && PREVIEW_ICONS[item.previewKind]) ?? 'file';
   }
 
   protected asSearchItem(item: PublicShareItem): PublicSearchItem | null {
@@ -383,7 +398,13 @@ export class PublicSharePageComponent implements OnInit {
     const status = error instanceof HttpErrorResponse ? error.status : 0;
     if (status === 404) return { title: 'Link não encontrado', message: 'Confira se o endereço foi copiado inteiro.' };
     if (status === 410) return { title: 'Link indisponível', message: toApiErrorMessage(error) };
-    if (status === 503) return { title: 'Arquivos indisponíveis', message: toApiErrorMessage(error) };
+    if (status === 503) {
+      const apiMessage = error instanceof HttpErrorResponse ? (error.error as { message?: unknown } | null)?.message : null;
+      return {
+        title: 'Arquivos indisponíveis no momento',
+        message: typeof apiMessage === 'string' && apiMessage ? apiMessage : 'Quem compartilhou precisa reconectar a conta do Google Drive.'
+      };
+    }
     return { title: 'Não foi possível abrir o link', message: toApiErrorMessage(error) };
   }
 }
