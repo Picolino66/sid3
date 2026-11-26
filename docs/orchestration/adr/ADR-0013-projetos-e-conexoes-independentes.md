@@ -33,7 +33,12 @@ Além do incidente, o painel misturava as entidades: cada tela tinha seu própri
    preenche os antigos. Trocar o destino de um bucket afeta só os próximos envios.
 6. **Saúde da conexão.** Recusas de autorização do Google marcam a conexão como `ERROR`. Revogar cancela o
    acesso no Google (quando nenhuma outra conexão ativa usa a mesma conta) e apaga os tokens.
-7. **Painel orientado a projeto.** Um seletor global de projeto; navegação em Projeto (Início, Arquivos,
+7. **Sem pastas duplicadas por concorrência.** Em 20/06 e 29/10 envios simultâneos criaram 3 `fotos` e 3 `sid3`
+   (consolidadas manualmente em 26/11). Agora a resolução de pastas roda sob uma trava por bucket/conexão
+   (`KeyedMutex`) relendo o banco dentro dela; a busca por nome no Drive escolhe sempre a pasta mais antiga
+   (`orderBy: createdTime`); e, depois de criar, o SID3 confere se outra instância criou a mesma pasta — se sim,
+   fica com a mais antiga e manda a sua (vazia) para a lixeira.
+8. **Painel orientado a projeto.** Um seletor global de projeto; navegação em Projeto (Início, Arquivos,
    Meu Drive, Links, Armazenamento), Desenvolvedor (Chaves, Logs, Estatísticas, Docs) e Conta (Projetos,
    Conexões). O dono vê e envia arquivos com o próprio login (JWT), sem chave de API.
 

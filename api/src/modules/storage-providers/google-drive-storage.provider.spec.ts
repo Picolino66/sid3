@@ -17,6 +17,7 @@ const driveExport = jest.fn();
 const changesList = jest.fn();
 const changesGetStartPageToken = jest.fn();
 const drivesList = jest.fn();
+const driveUpdate = jest.fn();
 const setCredentials = jest.fn();
 const oauthRequest = jest.fn();
 
@@ -28,6 +29,7 @@ jest.mock('googleapis', () => ({
         get: driveGet,
         delete: driveDelete,
         list: driveList,
+        update: (...args: unknown[]) => driveUpdate(...args),
         export: driveExport
       },
       changes: {
@@ -430,6 +432,27 @@ describe(GoogleDriveStorageProvider.name, () => {
         })
       }));
       expect(result).toBe('created-folder-id');
+    });
+
+    it('picks the oldest folder deterministically when duplicates exist', async () => {
+      driveList.mockResolvedValue({ data: { files: [{ id: 'oldest-folder-id' }] } });
+
+      await provider.findOrCreateFolder('fotos', integration);
+
+      expect(driveList).toHaveBeenCalledWith(expect.objectContaining({ orderBy: 'createdTime', pageSize: 1 }));
+    });
+
+    it('converges on the older folder and trashes its own duplicate when another request created one first', async () => {
+      driveList
+        .mockResolvedValueOnce({ data: { files: [] } })
+        .mockResolvedValueOnce({ data: { files: [{ id: 'folder-created-by-other-instance' }] } });
+      driveCreate.mockResolvedValue({ data: { id: 'my-new-folder' } });
+      driveUpdate.mockResolvedValue({ data: {} });
+
+      const result = await provider.findOrCreateFolder('fotos', integration);
+
+      expect(result).toBe('folder-created-by-other-instance');
+      expect(driveUpdate).toHaveBeenCalledWith({ fileId: 'my-new-folder', requestBody: { trashed: true } });
     });
 
     it('propagates BadGatewayException from Drive search failure', async () => {
