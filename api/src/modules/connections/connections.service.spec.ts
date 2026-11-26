@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Provider, ProviderIntegrationStatus, Sid3RootFolderStatus } from '@prisma/client';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
 import { DriveIndexSyncService } from '../drive-index/drive-index-sync.service';
@@ -22,6 +22,8 @@ type ProviderIntegrationDelegateMock = {
   findFirst: jest.Mock;
   findMany: jest.Mock;
   update: jest.Mock;
+  count: jest.Mock;
+  delete: jest.Mock;
 };
 
 describe(ConnectionsService.name, () => {
@@ -35,6 +37,9 @@ describe(ConnectionsService.name, () => {
     status: ProviderIntegrationStatus.CONNECTED,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
     sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED,
+    lastError: null,
+    lastErrorAt: null,
+    projectLinks: [],
     createdAt
   };
 
@@ -46,6 +51,9 @@ describe(ConnectionsService.name, () => {
   let storageProviderRegistry: jest.Mocked<Pick<StorageProviderRegistry, 'getProvider'>>;
   let driveIndexSyncService: jest.Mocked<Pick<DriveIndexSyncService, 'requestRefresh'>>;
   let service: ConnectionsService;
+  let bucketCount: jest.Mock;
+  let objectCount: jest.Mock;
+  let driveProvider: { getAccountIdentity: jest.Mock; revokeAuthorization: jest.Mock; createFolder: jest.Mock };
 
   beforeEach(() => {
     userDelegate = {
@@ -60,7 +68,9 @@ describe(ConnectionsService.name, () => {
       create: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
-      update: jest.fn()
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn()
     };
     googleOAuthClient = {
       createAuthorizationUrl: jest.fn((state: string) => `https://google.test/oauth?state=${state}`),
@@ -70,8 +80,13 @@ describe(ConnectionsService.name, () => {
       encrypt: jest.fn((value: string) => `encrypted:${value}`),
       decrypt: jest.fn()
     };
+    driveProvider = {
+      getAccountIdentity: jest.fn().mockResolvedValue({ accountId: 'google-account-1', email: 'me@example.com' }),
+      revokeAuthorization: jest.fn().mockResolvedValue(true),
+      createFolder: jest.fn()
+    };
     storageProviderRegistry = {
-      getProvider: jest.fn()
+      getProvider: jest.fn().mockReturnValue(driveProvider)
     };
     driveIndexSyncService = {
       requestRefresh: jest.fn().mockResolvedValue(undefined)
@@ -84,10 +99,15 @@ describe(ConnectionsService.name, () => {
       })
     );
 
+    bucketCount = jest.fn().mockResolvedValue(0);
+    objectCount = jest.fn().mockResolvedValue(0);
     const prisma = {
       user: userDelegate,
       oAuthState: oauthStateDelegate,
       providerIntegration: providerIntegrationDelegate,
+      bucket: { count: bucketCount },
+      storagePoolMember: { count: jest.fn().mockResolvedValue(0) },
+      storageObject: { count: objectCount },
       $transaction: transaction
     } as unknown as PrismaService;
 
@@ -108,11 +128,49 @@ describe(ConnectionsService.name, () => {
         userId,
         stateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
         redirectUri: 'google',
+        displayName: 'GOOGLE_DRIVE',
         expiresAt: expect.any(Date)
       })
     });
     expect(response.authorizationUrl).toContain('https://google.test/oauth?state=');
     expect(Date.parse(response.stateExpiresAt)).not.toBeNaN();
+  });
+
+  it('persists the chosen (trimmed) connection name in the OAuth state', async () => {
+    await service.createGoogleAuthorizationUrl(userId, '  Drive da Paula  ');
+
+    expect(oauthStateDelegate.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ displayName: 'Drive da Paula', connectionId: null })
+    });
+  });
+
+  it('falls back to GOOGLE_DRIVE when the chosen name is blank', async () => {
+    await service.createGoogleAuthorizationUrl(userId, '   ');
+
+    expect(oauthStateDelegate.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ displayName: 'GOOGLE_DRIVE' })
+    });
+  });
+
+  it('uses the name stored in the OAuth state when creating the connection', async () => {
+    oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id', connectionId: null, displayName: 'Meu Drive' });
+    googleOAuthClient.exchangeCode.mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiryDate: new Date('2026-05-24T14:00:00.000Z'),
+      scopes: ['https://www.googleapis.com/auth/drive.file']
+    });
+    providerIntegrationDelegate.create.mockResolvedValue({ ...persistedConnection, displayName: 'Meu Drive' });
+
+    await service.completeGoogleConnection(userId, {
+      code: 'google-code',
+      state: 'state-value-with-enough-length-123456'
+    });
+
+    expect(providerIntegrationDelegate.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ displayName: 'Meu Drive' }),
+      select: expect.any(Object)
+    });
   });
 
   it('completes Google connection by consuming state and storing encrypted tokens', async () => {
@@ -138,7 +196,7 @@ describe(ConnectionsService.name, () => {
       data: expect.objectContaining({
         userId,
         provider: Provider.GOOGLE_DRIVE,
-        displayName: null,
+        displayName: 'GOOGLE_DRIVE',
         encryptedAccessToken: 'encrypted:access-token',
         encryptedRefreshToken: 'encrypted:refresh-token',
         scopes: ['https://www.googleapis.com/auth/drive.file']
@@ -153,6 +211,9 @@ describe(ConnectionsService.name, () => {
       status: ProviderIntegrationStatus.CONNECTED,
       scopes: ['https://www.googleapis.com/auth/drive.file'],
       sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED,
+      lastError: null,
+      lastErrorAt: null,
+      projects: [],
       createdAt: createdAt.toISOString()
     });
   });
@@ -176,7 +237,6 @@ describe(ConnectionsService.name, () => {
     });
 
     expect(providerIntegrationDelegate.create).toHaveBeenCalledTimes(1);
-    expect(providerIntegrationDelegate.findFirst).not.toHaveBeenCalled();
     expect(providerIntegrationDelegate.update).not.toHaveBeenCalled();
   });
 
@@ -331,8 +391,19 @@ describe(ConnectionsService.name, () => {
     });
   });
 
-  it('revokes an owned connection', async () => {
-    providerIntegrationDelegate.findFirst.mockResolvedValue({ id: persistedConnection.id });
+  const storedCredentials = {
+    id: persistedConnection.id,
+    userId,
+    provider: Provider.GOOGLE_DRIVE,
+    status: ProviderIntegrationStatus.CONNECTED,
+    providerAccountId: 'google-account-1',
+    encryptedAccessToken: 'encrypted:access',
+    encryptedRefreshToken: 'encrypted:refresh',
+    tokenExpiresAt: null
+  };
+
+  it('revokes an owned connection at Google and wipes the stored tokens', async () => {
+    providerIntegrationDelegate.findFirst.mockResolvedValue(storedCredentials);
     providerIntegrationDelegate.update.mockResolvedValue({
       ...persistedConnection,
       status: ProviderIntegrationStatus.REVOKED
@@ -340,15 +411,114 @@ describe(ConnectionsService.name, () => {
 
     const response = await service.revokeConnection(userId, persistedConnection.id);
 
+    expect(driveProvider.revokeAuthorization).toHaveBeenCalledWith(storedCredentials);
     expect(providerIntegrationDelegate.update).toHaveBeenCalledWith({
       where: { id: persistedConnection.id },
       data: {
         status: ProviderIntegrationStatus.REVOKED,
-        revokedAt: expect.any(Date)
+        revokedAt: expect.any(Date),
+        encryptedAccessToken: '',
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
       },
       select: expect.any(Object)
     });
     expect(response.status).toBe(ProviderIntegrationStatus.REVOKED);
+  });
+
+  it('does not revoke at Google when another active connection uses the same account', async () => {
+    providerIntegrationDelegate.findFirst.mockResolvedValue(storedCredentials);
+    providerIntegrationDelegate.count.mockResolvedValue(1);
+    providerIntegrationDelegate.update.mockResolvedValue({ ...persistedConnection, status: ProviderIntegrationStatus.REVOKED });
+
+    await service.revokeConnection(userId, persistedConnection.id);
+
+    expect(driveProvider.revokeAuthorization).not.toHaveBeenCalled();
+  });
+
+  describe('account identity', () => {
+    const tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiryDate: null,
+      scopes: ['https://www.googleapis.com/auth/drive.file']
+    };
+    const callback = { code: 'google-code', state: 'state-value-with-enough-length-123456' };
+
+    beforeEach(() => {
+      googleOAuthClient.exchangeCode.mockResolvedValue(tokens);
+    });
+
+    it('stores the Google account id and email on a new connection', async () => {
+      oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id', connectionId: null, displayName: null });
+      providerIntegrationDelegate.create.mockResolvedValue(persistedConnection);
+
+      await service.completeGoogleConnection(userId, callback);
+
+      expect(providerIntegrationDelegate.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ providerAccountId: 'google-account-1', providerAccountEmail: 'me@example.com' }),
+        select: expect.any(Object)
+      });
+    });
+
+    it('refuses to reauthorize a connection with a different Google account', async () => {
+      oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id', connectionId: persistedConnection.id });
+      providerIntegrationDelegate.findFirst.mockResolvedValueOnce({
+        providerAccountId: 'google-account-original',
+        providerAccountEmail: 'isaias@example.com'
+      });
+
+      await expect(service.completeGoogleConnection(userId, callback)).rejects.toBeInstanceOf(ConflictException);
+      expect(providerIntegrationDelegate.update).not.toHaveBeenCalled();
+      expect(oauthStateDelegate.update).toHaveBeenCalledWith({
+        where: { id: 'oauth-state-id' },
+        data: { consumedAt: expect.any(Date) }
+      });
+    });
+
+    it('refuses to connect a Google account that is already connected', async () => {
+      oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id', connectionId: null, displayName: null });
+      providerIntegrationDelegate.findFirst.mockResolvedValueOnce({ displayName: 'Drive Isaias' });
+
+      await expect(service.completeGoogleConnection(userId, callback)).rejects.toThrow('Drive Isaias');
+      expect(providerIntegrationDelegate.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts the first reauthorization of a legacy connection without a stored account', async () => {
+      oauthStateDelegate.findFirst.mockResolvedValue({ id: 'oauth-state-id', connectionId: persistedConnection.id });
+      providerIntegrationDelegate.findFirst
+        .mockResolvedValueOnce({ providerAccountId: null, providerAccountEmail: null })
+        .mockResolvedValueOnce(null);
+      providerIntegrationDelegate.update.mockResolvedValue(persistedConnection);
+
+      await service.completeGoogleConnection(userId, callback);
+
+      expect(providerIntegrationDelegate.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ providerAccountId: 'google-account-1', lastError: null })
+        })
+      );
+    });
+  });
+
+  describe('deleteConnection', () => {
+    it('blocks deletion while buckets or files still depend on the connection', async () => {
+      providerIntegrationDelegate.findFirst.mockResolvedValue(storedCredentials);
+      bucketCount.mockResolvedValue(1);
+      objectCount.mockResolvedValue(211298);
+
+      await expect(service.deleteConnection(userId, persistedConnection.id)).rejects.toBeInstanceOf(ConflictException);
+      expect(providerIntegrationDelegate.delete).not.toHaveBeenCalled();
+    });
+
+    it('revokes and deletes an unused connection', async () => {
+      providerIntegrationDelegate.findFirst.mockResolvedValue(storedCredentials);
+
+      await service.deleteConnection(userId, persistedConnection.id);
+
+      expect(driveProvider.revokeAuthorization).toHaveBeenCalled();
+      expect(providerIntegrationDelegate.delete).toHaveBeenCalledWith({ where: { id: persistedConnection.id } });
+    });
   });
 
   it('rejects revoke for connections outside the current user', async () => {

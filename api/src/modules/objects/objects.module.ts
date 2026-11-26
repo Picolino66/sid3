@@ -8,6 +8,7 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { StorageProvidersModule } from '../storage-providers/storage-providers.module';
 import { StoragePoolsModule } from '../storage-pools/storage-pools.module';
 import { ObjectsController } from './objects.controller';
+import { OwnerObjectsController } from './owner-objects.controller';
 import { ObjectsService } from './objects.service';
 import { ReconciliationService } from './reconciliation.service';
 import { SignedUrlService } from './signed-url.service';
@@ -27,7 +28,7 @@ import { UploadProblemDetailsFilter } from './upload-problem-details.filter';
       limits: { fileSize: getMaxUploadBytes(), files: 1 }
     })
   ],
-  controllers: [ObjectsController],
+  controllers: [ObjectsController, OwnerObjectsController],
   providers: [ApiKeyAuthGuard, ObjectsService, SignedUrlService, ReconciliationService, UploadCleanupInterceptor, UploadProblemDetailsFilter],
   exports: [ObjectsService, SignedUrlService, ReconciliationService]
 })

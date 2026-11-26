@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { finalize } from 'rxjs';
 import { toApiErrorMessage } from '../../core/api/api-error';
-import { Connection, Sid3RootFolderDecision } from './connection.models';
+import { Connection, DEFAULT_CONNECTION_DISPLAY_NAME, Sid3RootFolderDecision } from './connection.models';
 import { ConnectionsService } from './connections.service';
 
 @Component({
@@ -12,6 +12,10 @@ import { ConnectionsService } from './connections.service';
     <header class="topbar">
       <div>
         <h1>Conexões</h1>
+        <p class="muted">
+          Contas do Google Drive conectadas ao SID3, independentes dos projetos. Para usar uma conta num projeto,
+          adicione-a em Armazenamento. A mesma conta pode estar em vários projetos.
+        </p>
       </div>
     </header>
 
@@ -22,7 +26,7 @@ import { ConnectionsService } from './connections.service';
     <section class="panel">
       <header class="panel-header-row">
         <h2>Contas Google Drive conectadas</h2>
-        <button type="button" [disabled]="isConnecting()" (click)="connectGoogle()">
+        <button type="button" [disabled]="isConnecting()" (click)="openConnectDialog()">
           {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
         </button>
       </header>
@@ -32,7 +36,7 @@ import { ConnectionsService } from './connections.service';
       } @else if (connections().length === 0) {
         <div class="empty-cta">
           <p class="muted">Nenhuma conta conectada ainda.</p>
-          <button type="button" [disabled]="isConnecting()" (click)="connectGoogle()">
+          <button type="button" [disabled]="isConnecting()" (click)="openConnectDialog()">
             {{ isConnecting() ? 'Conectando...' : 'Conectar Google Drive' }}
           </button>
         </div>
@@ -40,8 +44,8 @@ import { ConnectionsService } from './connections.service';
         <div class="table connection-table" role="table" aria-label="Conexões de provedor">
           <div role="row" class="head">
             <span role="columnheader">Nome</span>
-            <span role="columnheader">Conta</span>
-            <span role="columnheader">Provedor</span>
+            <span role="columnheader">Conta Google</span>
+            <span role="columnheader">Projetos</span>
             <span role="columnheader">Status</span>
             <span role="columnheader">Criado em</span>
             <span role="columnheader">Ação</span>
@@ -66,13 +70,22 @@ import { ConnectionsService } from './connections.service';
                 }
               </span>
               <span role="cell">{{ connection.providerAccountEmail ?? '—' }}</span>
-              <span role="cell">{{ connection.provider === 'GOOGLE_DRIVE' ? 'Google Drive' : connection.provider }}</span>
+              <span role="cell">
+                @if (connection.projects.length === 0) {
+                  <span class="muted">Nenhum</span>
+                } @else {
+                  {{ projectNames(connection) }}
+                }
+              </span>
               <span role="cell">
                 <span [class]="'status-label ' + connection.status.toLowerCase()">
                   {{ connection.status === 'CONNECTED' ? 'Conectado' : connection.status === 'REVOKED' ? 'Revogado' : 'Erro' }}
                 </span>
                 @if (connection.sid3RootFolderStatus === 'PENDING_CONFIRMATION') {
                   <span class="status-label pending_confirmation">Pasta sid3 pendente</span>
+                }
+                @if (connection.status === 'ERROR' && connection.lastError) {
+                  <span class="field-hint field-hint--error">{{ errorLabel(connection.lastError) }}</span>
                 }
               </span>
               <span role="cell">{{ connection.createdAt | date: 'dd/MM/yyyy HH:mm' }}</span>
@@ -94,21 +107,60 @@ import { ConnectionsService } from './connections.service';
                 >
                   {{ reauthorizingId() === connection.id ? 'Redirecionando...' : 'Reconectar' }}
                 </button>
-                @if (connection.status === 'CONNECTED') {
-                  <button
-                    class="danger compact-button"
-                    type="button"
-                    (click)="revoke(connection)"
-                  >
-                    Revogar
-                  </button>
+                @if (connection.status !== 'REVOKED') {
+                  <button class="secondary compact-button" type="button" (click)="revoke(connection)">Revogar</button>
                 }
+                <button class="danger compact-button" type="button" (click)="deleteConnection(connection)">Excluir</button>
               </span>
             </div>
           }
         </div>
       }
     </section>
+
+    @if (isConnectDialogOpen()) {
+      <div class="modal-overlay" role="presentation" (click)="closeConnectDialog()">
+        <form
+          class="modal-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="connect-dialog-title"
+          (click)="$event.stopPropagation()"
+          (submit)="$event.preventDefault(); connectGoogle()"
+        >
+          <h3 id="connect-dialog-title">Conectar Google Drive</h3>
+          <label>
+            Nome da conexão
+            <input
+              type="text"
+              maxlength="100"
+              autocomplete="off"
+              [value]="connectName()"
+              [placeholder]="defaultConnectionName"
+              (input)="connectName.set($any($event.target).value)"
+              (keydown.escape)="closeConnectDialog()"
+            />
+          </label>
+          <p class="muted">
+            Use um nome que identifique a conta (ex.: "Drive pessoal"). Em branco, fica {{ defaultConnectionName }}.
+            Você será levado ao Google para escolher a conta.
+          </p>
+          <div class="modal-actions">
+            <button
+              class="secondary compact-button"
+              type="button"
+              [disabled]="isConnecting()"
+              (click)="closeConnectDialog()"
+            >
+              Cancelar
+            </button>
+            <button class="compact-button" type="submit" [disabled]="isConnecting()">
+              {{ isConnecting() ? 'Redirecionando...' : 'Continuar no Google' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    }
 
     @if (sid3RootDialogConnection(); as connection) {
       <div class="modal-overlay" role="presentation" (click)="closeSid3RootDialog()">
@@ -167,6 +219,9 @@ export class ConnectionsPageComponent {
   protected readonly connections = signal<Connection[]>([]);
   protected readonly isLoading = signal(true);
   protected readonly isConnecting = signal(false);
+  protected readonly isConnectDialogOpen = signal(false);
+  protected readonly connectName = signal(DEFAULT_CONNECTION_DISPLAY_NAME);
+  protected readonly defaultConnectionName = DEFAULT_CONNECTION_DISPLAY_NAME;
   protected readonly reauthorizingId = signal<string | null>(null);
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly editingId = signal<string | null>(null);
@@ -179,17 +234,34 @@ export class ConnectionsPageComponent {
     this.loadConnections();
   }
 
+  openConnectDialog(): void {
+    this.errorMessage.set(null);
+    this.connectName.set(DEFAULT_CONNECTION_DISPLAY_NAME);
+    this.isConnectDialogOpen.set(true);
+  }
+
+  closeConnectDialog(): void {
+    if (this.isConnecting()) {
+      return;
+    }
+    this.isConnectDialogOpen.set(false);
+  }
+
   connectGoogle(): void {
+    const displayName = this.connectName().trim() || DEFAULT_CONNECTION_DISPLAY_NAME;
     this.errorMessage.set(null);
     this.isConnecting.set(true);
     this.connectionsService
-      .createGoogleAuthorizationUrl()
+      .createGoogleAuthorizationUrl({ displayName })
       .pipe(finalize(() => this.isConnecting.set(false)))
       .subscribe({
         next: (response) => {
           window.location.assign(response.authorizationUrl);
         },
-        error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+        error: (error: unknown) => {
+          this.isConnectDialogOpen.set(false);
+          this.errorMessage.set(toApiErrorMessage(error));
+        }
       });
   }
 
@@ -236,7 +308,11 @@ export class ConnectionsPageComponent {
 
   revoke(connection: Connection): void {
     const name = connection.displayName ?? connection.provider;
-    if (!window.confirm(`Revogar a conexão com ${name}? Buckets que dependem desta conta deixarão de funcionar.`)) {
+    if (
+      !window.confirm(
+        `Revogar a conexão "${name}"? O acesso do SID3 é cancelado no Google e os buckets e arquivos desta conta ficam inacessíveis até reconectar.`
+      )
+    ) {
       return;
     }
     this.errorMessage.set(null);
@@ -244,6 +320,28 @@ export class ConnectionsPageComponent {
       next: (updated) => {
         this.connections.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
       },
+      error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+    });
+  }
+
+  protected projectNames(connection: Connection): string {
+    return connection.projects.map((project) => project.name).join(', ');
+  }
+
+  protected errorLabel(code: string): string {
+    if (code === 'ACCOUNT_MISMATCH') return 'Tokens de outra conta Google: reconecte com a conta original.';
+    if (code === 'AUTHORIZATION_FAILED') return 'O Google recusou a autorização: reconecte.';
+    return code;
+  }
+
+  deleteConnection(connection: Connection): void {
+    const name = connection.displayName ?? connection.provider;
+    if (!window.confirm(`Excluir a conexão "${name}"? Só é possível quando nenhum bucket, pool ou arquivo depende dela.`)) {
+      return;
+    }
+    this.errorMessage.set(null);
+    this.connectionsService.deleteConnection(connection.id).subscribe({
+      next: () => this.connections.update((items) => items.filter((item) => item.id !== connection.id)),
       error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
     });
   }

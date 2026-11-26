@@ -5,6 +5,12 @@ export class ObjectListResponseDto {
   @ApiProperty({ type: StorageObjectResponseDto, isArray: true })
   items!: StorageObjectResponseDto[];
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({
+    type: [String],
+    description: 'Subpastas diretas do prefixo (apenas com delimiter=/ e na primeira página), ex.: "images/".'
+  })
+  folders!: string[];
+
+  @ApiProperty({ nullable: true, description: 'Passe em `cursor` para buscar a próxima página.' })
   nextCursor!: string | null;
 }

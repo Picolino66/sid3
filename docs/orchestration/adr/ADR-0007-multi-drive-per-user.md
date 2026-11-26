@@ -20,6 +20,7 @@ A evolução do produto para tornar o SID3 uma plataforma de abstração de arma
 - Adicionado campo `displayName: String?` em `ProviderIntegration`
 - Renomeado módulo `integrations` → `connections` em toda a API e frontend
 - Adicionado endpoint `PATCH /connections/:connectionId` para editar `displayName`
+- (2026-11-26) `POST /connections/google/authorize` aceita `displayName` opcional: o nome fica em `oauth_states.display_name` e é aplicado à conexão criada no callback; vazio/ausente vira `GOOGLE_DRIVE`. A reautorização não altera o nome. O dashboard pede o nome num diálogo antes de redirecionar ao Google.
 
 ## Trade-offs
 

@@ -27,6 +27,23 @@ export class ConnectionResponseDto {
   })
   sid3RootFolderStatus!: Sid3RootFolderStatus;
 
+  @ApiPropertyOptional({ nullable: true, description: 'Último erro registrado (ex.: AUTHORIZATION_FAILED, ACCOUNT_MISMATCH).' })
+  lastError!: string | null;
+
+  @ApiPropertyOptional({ format: 'date-time', nullable: true })
+  lastErrorAt!: string | null;
+
+  @ApiProperty({ type: () => ConnectionProjectRefDto, isArray: true, description: 'Projetos onde esta conexão está disponível.' })
+  projects!: ConnectionProjectRefDto[];
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
+}
+
+export class ConnectionProjectRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
 }

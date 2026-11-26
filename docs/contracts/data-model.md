@@ -26,6 +26,18 @@
 - `slug`: unique per owner
 - `created_at`, `updated_at`
 
+### ProjectConnection
+
+Connections (Google accounts) are owned by the user and independent from projects. This link makes a connection
+available inside a project; the same connection can be linked to N projects (ADR-0013).
+
+- `id`: UUID primary key
+- `project_id`: FK -> Project (cascade)
+- `provider_integration_id`: FK -> ProviderIntegration (cascade)
+- `created_at`
+- unique (`project_id`, `provider_integration_id`)
+- Buckets and pool members of a project may only use linked connections; unlinking is refused while project buckets, pools or files depend on it.
+
 ### ApiKey
 
 - `id`: UUID primary key
@@ -42,8 +54,11 @@
 - `id`: UUID primary key
 - `user_id`: FK -> User
 - `provider`: enum, initially `GOOGLE_DRIVE`
-- `provider_account_email`: optional
-- `encrypted_access_token`: required
+- `display_name`: name chosen when connecting (default `GOOGLE_DRIVE`)
+- `provider_account_email`: Google account e-mail, filled on connect (ADR-0013)
+- `provider_account_id`: stable Google account id (`about.user.permissionId`); reauthorizing with a different account is refused
+- `last_error`, `last_error_at`: last health problem (`AUTHORIZATION_FAILED`, `ACCOUNT_MISMATCH`); set together with status `ERROR`
+- `encrypted_access_token`: required (emptied when the connection is revoked)
 - `encrypted_refresh_token`: required when supplied by Google
 - `token_expires_at`: optional
 - `scopes`: string array or normalized scope table
@@ -144,7 +159,7 @@ Cache mapping a bucket to its corresponding Google Drive folder on each drive in
 - `project_id`: FK -> Project
 - `bucket_id`: FK -> Bucket
 - `owner_user_id`: FK -> User
-- `resolved_integration_id`: optional FK -> ProviderIntegration — records which pool member was used; null for direct-drive buckets
+- `resolved_integration_id`: FK -> ProviderIntegration — the connection where the file is stored; always set on upload (direct buckets and pools) and backfilled by migration `20261126010000`. Downloads and deletes use it, so changing a bucket destination never breaks older files
 - `key`: required, unique per bucket for active objects
 - `provider`: enum, initially `GOOGLE_DRIVE`
 - `provider_file_id`: Google Drive file ID; file is stored inside `sid3/<bucket>` in the connected Drive

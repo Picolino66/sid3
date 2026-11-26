@@ -1,8 +1,10 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { finalize } from 'rxjs';
+import { finalize, of, switchMap } from 'rxjs';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { ProjectsService } from '../projects/projects.service';
 import { toApiErrorMessage } from '../../core/api/api-error';
 import { NotificationService } from '../../core/notifications/notification.service';
 import { ShareLink, ShareLinkStatus, shareLinkUrl } from './share-link.models';
@@ -20,6 +22,7 @@ const STATUS_LABELS: Record<ShareLinkStatus, { label: string; css: string }> = {
   template: `
     <header class="topbar">
       <div>
+        <p class="eyebrow">{{ projectContext.currentProject()?.name ?? 'Projeto' }}</p>
         <h1>Links compartilhados</h1>
         <p class="muted">Links públicos gerados a partir de "Meu Drive". Quem tiver o link vê e baixa os itens.</p>
       </div>
@@ -116,11 +119,28 @@ export class ShareLinksPageComponent {
   protected readonly revokingId = signal<string | null>(null);
   protected readonly showInactive = signal(false);
 
-  protected readonly visibleLinks = computed(() =>
-    this.showInactive() ? this.links() : this.links().filter((link) => link.status === 'ACTIVE')
-  );
+  protected readonly projectContext = inject(ProjectContextService);
+  private readonly projectsService = inject(ProjectsService);
+  /** Contas do projeto atual: só os links dessas contas aparecem. */
+  private readonly projectConnectionIds = signal<Set<string> | null>(null);
+
+  protected readonly visibleLinks = computed(() => {
+    const allowed = this.projectConnectionIds();
+    const inProject = allowed ? this.links().filter((link) => allowed.has(link.connectionId)) : [];
+    return this.showInactive() ? inProject : inProject.filter((link) => link.status === 'ACTIVE');
+  });
 
   constructor() {
+    toObservable(this.projectContext.currentProjectId)
+      .pipe(
+        switchMap((projectId) => (projectId ? this.projectsService.listProjectConnections(projectId) : of([]))),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe({
+        next: (connections) => this.projectConnectionIds.set(new Set(connections.map((connection) => connection.connectionId))),
+        error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
+      });
+
     this.shareLinksService
       .listShareLinks()
       .pipe(

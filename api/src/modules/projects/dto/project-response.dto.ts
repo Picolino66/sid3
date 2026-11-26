@@ -10,6 +10,12 @@ export class ProjectResponseDto {
   @ApiProperty({ example: 'image-storage' })
   slug!: string;
 
+  @ApiProperty({ description: 'Conexões disponíveis neste projeto' })
+  connectionCount!: number;
+
+  @ApiProperty()
+  bucketCount!: number;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 }

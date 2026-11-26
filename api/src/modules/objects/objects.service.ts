@@ -1,28 +1,53 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
-import { OperationStatus, OperationType, Prisma, Provider, Sid3RootFolderStatus, StorageObjectStatus } from '@prisma/client';
+import {
+  OperationStatus,
+  OperationType,
+  Prisma,
+  Provider,
+  ProviderIntegrationStatus,
+  Sid3RootFolderStatus,
+  StorageObjectStatus
+} from '@prisma/client';
 import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
-import { ApiKeyAuthContext } from '../../common/auth/api-key-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { PoolRoutingFactory } from '../storage-pools/pool-routing/pool-routing.factory';
 import { PoolMemberCredentials } from '../storage-pools/pool-routing/pool-routing.strategy';
 import { GoogleDriveStorageProvider } from '../storage-providers/google-drive-storage.provider';
 import { StorageProviderRegistry } from '../storage-providers/storage-provider.registry';
 import { StorageProviderIntegrationCredentials } from '../storage-providers/dto/storage-provider.types';
+import { ConnectionHealthService } from '../storage-providers/connection-health.service';
 import { ObjectListResponseDto } from './dto/object-list-response.dto';
 import { StorageObjectResponseDto } from './dto/storage-object-response.dto';
 import { UploadObjectRequestDto } from './dto/upload-object-request.dto';
 import { SignedDownloadUrlResponseDto } from './dto/signed-download-url-response.dto';
 import { SignedUrlService } from './signed-url.service';
 
+/** Quem está operando: uma chave de API (sistema externo) ou o dono do projeto logado no painel. */
+export type ObjectAccessContext = {
+  projectId: string;
+  apiKeyId: string | null;
+  userId?: string | null;
+};
+
 type ListObjectsQuery = {
   prefix?: string;
   limit?: string;
+  cursor?: string;
+  delimiter?: string;
+};
+
+type ListObjectsOptions = {
+  /** Inclui URL assinada por item (usado pelo painel para miniaturas e reprodução). */
+  includeDownloadUrls?: boolean;
+  /** Prefixo público da API usado para montar as URLs assinadas. */
+  downloadUrlBase?: string;
 };
 
 type PersistedObject = {
   id: string;
+  projectId: string;
   bucketId: string;
   key: string;
   fileName: string;
@@ -35,6 +60,9 @@ type PersistedObject = {
 };
 
 type BucketIntegrationCredentials = {
+  id: string;
+  status: ProviderIntegrationStatus;
+  displayName: string | null;
   provider: Provider;
   encryptedAccessToken: string;
   encryptedRefreshToken: string | null;
@@ -72,7 +100,8 @@ export class ObjectsService {
     private readonly prisma: PrismaService,
     private readonly storageProviderRegistry: StorageProviderRegistry,
     private readonly poolRoutingFactory: PoolRoutingFactory,
-    @Optional() private signedUrlService?: SignedUrlService
+    @Optional() private signedUrlService?: SignedUrlService,
+    @Optional() private readonly connectionHealth?: ConnectionHealthService
   ) {
     if (!this.signedUrlService) {
       this.signedUrlService = new SignedUrlService();
@@ -80,35 +109,132 @@ export class ObjectsService {
   }
 
   async listObjects(
-    apiKey: ApiKeyAuthContext,
+    access: ObjectAccessContext,
     bucketId: string,
-    query: ListObjectsQuery
+    query: ListObjectsQuery,
+    options: ListObjectsOptions = {}
   ): Promise<ObjectListResponseDto> {
-    await this.getAuthorizedBucket(apiKey.projectId, bucketId);
+    await this.getAuthorizedBucket(access.projectId, bucketId);
     const limit = this.parseLimit(query.limit);
+    const prefix = query.prefix ?? '';
 
-    const objects = await this.prisma.storageObject.findMany({
-      where: {
-        projectId: apiKey.projectId,
-        bucketId,
-        deletedAt: null,
-        ...(query.prefix ? { key: { startsWith: query.prefix } } : {})
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      select: this.storageObjectSelect()
-    });
+    if (query.delimiter !== undefined && query.delimiter !== '' && query.delimiter !== '/') {
+      throw new BadRequestException('O único delimitador suportado é "/"');
+    }
 
-    await this.logOperation(apiKey, bucketId, null, OperationType.LIST, OperationStatus.SUCCESS);
+    const page = query.delimiter === '/'
+      ? await this.listFolderLevel(access.projectId, bucketId, prefix, limit, query.cursor)
+      : await this.listFlat(access.projectId, bucketId, prefix, limit, query.cursor);
+
+    await this.logOperation(access, bucketId, null, OperationType.LIST, OperationStatus.SUCCESS);
 
     return {
-      items: objects.map((object) => this.toStorageObjectResponse(object)),
-      nextCursor: null
+      items: page.objects.map((object) => this.toStorageObjectResponse(object, options)),
+      folders: page.folders,
+      nextCursor: page.nextCursor
     };
   }
 
+  /** Lista em ordem de envio (mais recentes primeiro) com cursor por (createdAt, id). */
+  private async listFlat(projectId: string, bucketId: string, prefix: string, limit: number, cursor?: string) {
+    const position = cursor ? this.decodeCursor<{ c: string; i: string }>(cursor) : null;
+    const objects = await this.prisma.storageObject.findMany({
+      where: {
+        projectId,
+        bucketId,
+        deletedAt: null,
+        ...(prefix ? { key: { startsWith: prefix } } : {}),
+        ...(position
+          ? {
+              OR: [
+                { createdAt: { lt: new Date(position.c) } },
+                { createdAt: new Date(position.c), id: { lt: position.i } }
+              ]
+            }
+          : {})
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: this.storageObjectSelect()
+    });
+
+    const hasMore = objects.length > limit;
+    const pageItems = hasMore ? objects.slice(0, limit) : objects;
+    const last = pageItems.at(-1);
+
+    return {
+      objects: pageItems,
+      folders: [] as string[],
+      nextCursor: hasMore && last ? this.encodeCursor({ c: last.createdAt.toISOString(), i: last.id }) : null
+    };
+  }
+
+  /** Navegação por pastas: subpastas do prefixo + arquivos diretamente nele, em ordem alfabética de chave. */
+  private async listFolderLevel(projectId: string, bucketId: string, prefix: string, limit: number, cursor?: string) {
+    const afterKey = cursor ? this.decodeCursor<{ k: string }>(cursor).k : null;
+    const prefixLength = prefix.length;
+
+    const folders = afterKey
+      ? []
+      : (
+          await this.prisma.$queryRaw<{ name: string }[]>(Prisma.sql`
+            SELECT DISTINCT split_part(substring(key from ${prefixLength + 1}::int), '/', 1) AS name
+            FROM storage_objects
+            WHERE project_id = ${projectId}::uuid
+              AND bucket_id = ${bucketId}::uuid
+              AND deleted_at IS NULL
+              AND left(key, ${prefixLength}::int) = ${prefix}
+              AND strpos(substring(key from ${prefixLength + 1}::int), '/') > 0
+            ORDER BY 1
+            LIMIT 1000
+          `)
+        )
+          .map((row) => row.name)
+          .filter((name) => name !== '')
+          .map((name) => `${prefix}${name}/`);
+
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT id
+      FROM storage_objects
+      WHERE project_id = ${projectId}::uuid
+        AND bucket_id = ${bucketId}::uuid
+        AND deleted_at IS NULL
+        AND left(key, ${prefixLength}::int) = ${prefix}
+        AND strpos(substring(key from ${prefixLength + 1}::int), '/') = 0
+        ${afterKey !== null ? Prisma.sql`AND key > ${afterKey}` : Prisma.empty}
+      ORDER BY key
+      LIMIT ${limit + 1}::int
+    `);
+
+    const hasMore = rows.length > limit;
+    const ids = (hasMore ? rows.slice(0, limit) : rows).map((row) => row.id);
+    const objects = ids.length
+      ? await this.prisma.storageObject.findMany({ where: { id: { in: ids } }, select: this.storageObjectSelect() })
+      : [];
+    objects.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    const last = objects.at(-1);
+
+    return {
+      objects,
+      folders,
+      nextCursor: hasMore && last ? this.encodeCursor({ k: last.key }) : null
+    };
+  }
+
+  private encodeCursor(value: object): string {
+    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  }
+
+  private decodeCursor<T>(cursor: string): T {
+    try {
+      return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as T;
+    } catch {
+      throw new BadRequestException('Cursor de paginação inválido');
+    }
+  }
+
   async uploadObject(
-    apiKey: ApiKeyAuthContext,
+    apiKey: ObjectAccessContext,
     bucketId: string,
     request: UploadObjectRequestDto,
     file: Express.Multer.File | undefined
@@ -121,7 +247,9 @@ export class ObjectsService {
     const resolvedCredentials = await this.resolveIntegrationForUpload(bucket);
 
     await this.ensureObjectKeyAvailable(apiKey, bucketId, request.key, resolvedCredentials.provider);
-    const parentFolderId = await this.resolveBucketFolderOnDrive(bucket, resolvedCredentials.integrationId, resolvedCredentials);
+    const parentFolderId = await this.withHealthReport(resolvedCredentials.integrationId, () =>
+      this.resolveBucketFolderOnDrive(bucket, resolvedCredentials.integrationId, resolvedCredentials)
+    );
     const checksumSha256 = await this.calculateChecksum(file);
     const storageObject = await this.createPendingObject(
       apiKey,
@@ -129,7 +257,7 @@ export class ObjectsService {
       request,
       file,
       resolvedCredentials,
-      bucket.storagePoolId ? resolvedCredentials.integrationId : null,
+      resolvedCredentials.integrationId,
       checksumSha256
     );
 
@@ -162,6 +290,7 @@ export class ObjectsService {
       return this.toStorageObjectResponse(updated);
     } catch (error) {
       const errorCode = this.extractErrorCode(error);
+      await this.connectionHealth?.reportFailure(resolvedCredentials.integrationId, error);
       this.logger.error(
         `Upload failed for bucket=${bucketId} object=${storageObject.id} errorCode=${errorCode}`,
         error instanceof Error ? error.stack : String(error)
@@ -185,7 +314,7 @@ export class ObjectsService {
   }
 
   async downloadObject(
-    apiKey: ApiKeyAuthContext,
+    apiKey: ObjectAccessContext,
     bucketId: string,
     objectId: string
   ): Promise<{ stream: Readable; fileName: string | null; contentType: string | null; sizeBytes: number | null }> {
@@ -193,17 +322,19 @@ export class ObjectsService {
     const storageObject = await this.getAvailableObject(apiKey.projectId, bucketId, objectId);
     const credentials = await this.resolveIntegrationForAccess(storageObject.resolvedIntegrationId, bucket);
     const provider = this.storageProviderRegistry.getProvider(storageObject.provider);
-    const download = await provider.downloadObject({
-      integration: credentials,
-      providerFileId: storageObject.providerFileId
-    });
+    const download = await this.withHealthReport(credentials.integrationId, () =>
+      provider.downloadObject({
+        integration: credentials,
+        providerFileId: storageObject.providerFileId
+      })
+    );
 
     await this.logOperation(apiKey, bucketId, objectId, OperationType.DOWNLOAD, OperationStatus.SUCCESS);
     return download;
   }
 
   async signDownloadUrl(
-    apiKey: ApiKeyAuthContext,
+    apiKey: ObjectAccessContext,
     bucketId: string,
     objectId: string,
     expiresInSeconds?: number
@@ -219,7 +350,7 @@ export class ObjectsService {
     );
   }
 
-  async deleteObject(apiKey: ApiKeyAuthContext, bucketId: string, objectId: string): Promise<void> {
+  async deleteObject(apiKey: ObjectAccessContext, bucketId: string, objectId: string): Promise<void> {
     const bucket = await this.getAuthorizedBucket(apiKey.projectId, bucketId);
     const storageObject = await this.getObjectForDelete(apiKey.projectId, bucketId, objectId);
 
@@ -235,10 +366,21 @@ export class ObjectsService {
 
     const credentials = await this.resolveIntegrationForAccess(storageObject.resolvedIntegrationId, bucket);
     const provider = this.storageProviderRegistry.getProvider(storageObject.provider);
-    await provider.deleteObject({
-      integration: credentials,
-      providerFileId: storageObject.providerFileId
-    });
+    try {
+      await this.withHealthReport(credentials.integrationId, () =>
+        provider.deleteObject({
+          integration: credentials,
+          providerFileId: storageObject.providerFileId
+        })
+      );
+    } catch (error) {
+      await this.prisma.storageObject.update({
+        where: { id: objectId },
+        data: { status: storageObject.status },
+        select: { id: true }
+      });
+      throw error;
+    }
 
     await this.prisma.storageObject.update({
       where: { id: objectId },
@@ -265,12 +407,7 @@ export class ObjectsService {
         storagePoolId: true,
         providerRootRef: true,
         providerIntegration: {
-          select: {
-            provider: true,
-            encryptedAccessToken: true,
-            encryptedRefreshToken: true,
-            tokenExpiresAt: true
-          }
+          select: this.integrationCredentialsSelect()
         },
         storagePool: {
           select: {
@@ -282,12 +419,7 @@ export class ObjectsService {
                 weight: true,
                 roundRobinIndex: true,
                 providerIntegration: {
-                  select: {
-                    provider: true,
-                    encryptedAccessToken: true,
-                    encryptedRefreshToken: true,
-                    tokenExpiresAt: true
-                  }
+                  select: this.integrationCredentialsSelect()
                 }
               }
             }
@@ -307,10 +439,15 @@ export class ObjectsService {
     bucket: BucketWithIntegration
   ): Promise<StorageProviderIntegrationCredentials & { integrationId: string }> {
     if (bucket.storagePool) {
-      const { members, strategy } = bucket.storagePool;
+      const { strategy } = bucket.storagePool;
+      const members = bucket.storagePool.members.filter(
+        (member) => member.providerIntegration.status === ProviderIntegrationStatus.CONNECTED
+      );
 
       if (members.length === 0) {
-        throw new BadRequestException('O pool de armazenamento não possui membros ativos');
+        throw new ConflictException(
+          'Nenhuma conexão do pool está ativa. Reconecte as contas do pool em Conexões antes de enviar arquivos.'
+        );
       }
 
       const memberCredentials: PoolMemberCredentials[] = members.map((m) => ({
@@ -343,9 +480,10 @@ export class ObjectsService {
     }
 
     const integration = bucket.providerIntegration;
+    this.assertIntegrationActive(integration);
 
     return {
-      integrationId: '',
+      integrationId: integration.id,
       provider: integration.provider,
       encryptedAccessToken: integration.encryptedAccessToken,
       encryptedRefreshToken: integration.encryptedRefreshToken,
@@ -356,26 +494,90 @@ export class ObjectsService {
   private async resolveIntegrationForAccess(
     resolvedIntegrationId: string | null,
     bucket: BucketWithIntegration
-  ): Promise<StorageProviderIntegrationCredentials> {
-    if (resolvedIntegrationId) {
-      const integration = await this.prisma.providerIntegration.findUniqueOrThrow({
-        where: { id: resolvedIntegrationId },
-        select: {
-          provider: true,
-          encryptedAccessToken: true,
-          encryptedRefreshToken: true,
-          tokenExpiresAt: true
-        }
-      });
+  ): Promise<StorageProviderIntegrationCredentials & { integrationId: string }> {
+    const integration = resolvedIntegrationId
+      ? await this.prisma.providerIntegration.findUniqueOrThrow({
+          where: { id: resolvedIntegrationId },
+          select: this.integrationCredentialsSelect()
+        })
+      : bucket.providerIntegration;
 
-      return integration;
-    }
-
-    if (!bucket.providerIntegration) {
+    if (!integration) {
       throw new BadRequestException('Não foi possível resolver a integração de armazenamento para este bucket');
     }
 
-    return bucket.providerIntegration;
+    this.assertIntegrationActive(integration);
+
+    return {
+      integrationId: integration.id,
+      provider: integration.provider,
+      encryptedAccessToken: integration.encryptedAccessToken,
+      encryptedRefreshToken: integration.encryptedRefreshToken,
+      tokenExpiresAt: integration.tokenExpiresAt
+    };
+  }
+
+  private assertIntegrationActive(integration: BucketIntegrationCredentials): void {
+    if (integration.status === ProviderIntegrationStatus.CONNECTED) {
+      return;
+    }
+
+    const name = integration.displayName ?? 'GOOGLE_DRIVE';
+    const state = integration.status === ProviderIntegrationStatus.REVOKED ? 'revogada' : 'com erro de autorização';
+    throw new ConflictException(`A conexão "${name}" que guarda estes arquivos está ${state}. Reconecte-a em Conexões.`);
+  }
+
+  private integrationCredentialsSelect() {
+    return {
+      id: true,
+      status: true,
+      displayName: true,
+      provider: true,
+      encryptedAccessToken: true,
+      encryptedRefreshToken: true,
+      tokenExpiresAt: true
+    } satisfies Prisma.ProviderIntegrationSelect;
+  }
+
+  /** Executa uma chamada ao Drive e, se o Google recusar a autorização, marca a conexão como ERROR. */
+  private async withHealthReport<T>(integrationId: string | null, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      await this.connectionHealth?.reportFailure(integrationId, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Antes de recriar uma pasta que "sumiu", confirma que os tokens ainda são da mesma conta Google.
+   * Se a conta mudou, para tudo em vez de criar pastas na conta errada.
+   */
+  private async assertSameGoogleAccount(
+    integrationId: string,
+    driveProvider: GoogleDriveStorageProvider,
+    credentials: StorageProviderIntegrationCredentials
+  ): Promise<void> {
+    const stored = await this.prisma.providerIntegration.findUniqueOrThrow({
+      where: { id: integrationId },
+      select: { providerAccountId: true }
+    });
+    const identity = await driveProvider.getAccountIdentity(credentials);
+
+    if (!stored?.providerAccountId) {
+      await this.prisma.providerIntegration.updateMany({
+        where: { id: integrationId, providerAccountId: null },
+        data: { providerAccountId: identity.accountId, providerAccountEmail: identity.email }
+      });
+      return;
+    }
+
+    if (stored.providerAccountId !== identity.accountId) {
+      await this.connectionHealth?.markError(integrationId, 'ACCOUNT_MISMATCH');
+      throw new ConflictException(
+        'Os tokens desta conexão pertencem a outra conta Google. Os envios foram bloqueados para não gravar na conta errada; reconecte com a conta original.'
+      );
+    }
   }
 
   private async getProjectOwnerId(projectId: string): Promise<string> {
@@ -392,7 +594,7 @@ export class ObjectsService {
   }
 
   private async ensureObjectKeyAvailable(
-    apiKey: ApiKeyAuthContext,
+    apiKey: ObjectAccessContext,
     bucketId: string,
     key: string,
     provider: Provider
@@ -423,7 +625,7 @@ export class ObjectsService {
   }
 
   private async createPendingObject(
-    apiKey: ApiKeyAuthContext,
+    apiKey: ObjectAccessContext,
     bucketId: string,
     request: UploadObjectRequestDto,
     file: Express.Multer.File,
@@ -436,7 +638,7 @@ export class ObjectsService {
         data: {
           projectId: apiKey.projectId,
           bucketId,
-          ownerUserId: await this.getProjectOwnerId(apiKey.projectId),
+          ownerUserId: apiKey.userId ?? (await this.getProjectOwnerId(apiKey.projectId)),
           resolvedIntegrationId,
           key: request.key,
           provider: credentials.provider,
@@ -528,15 +730,20 @@ export class ObjectsService {
     }
 
     const parsedLimit = Number(limit);
-    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
-      throw new BadRequestException('O limite deve ser um inteiro entre 1 e 100');
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      throw new BadRequestException('O limite deve ser um inteiro entre 1 e 200');
     }
 
     return parsedLimit;
   }
 
-  private toStorageObjectResponse(storageObject: PersistedObject): StorageObjectResponseDto {
+  private toStorageObjectResponse(storageObject: PersistedObject, options: ListObjectsOptions = {}): StorageObjectResponseDto {
+    const downloadUrl = options.includeDownloadUrls && storageObject.status === StorageObjectStatus.AVAILABLE
+      ? this.buildSignedDownloadUrl(storageObject, options.downloadUrlBase ?? '')
+      : undefined;
+
     return {
+      ...(downloadUrl !== undefined ? { downloadUrl } : {}),
       id: storageObject.id,
       bucketId: storageObject.bucketId,
       key: storageObject.key,
@@ -550,9 +757,20 @@ export class ObjectsService {
     };
   }
 
+  private buildSignedDownloadUrl(storageObject: PersistedObject, base: string): string {
+    const signed = this.signedUrlService!.generateSignedDownloadToken(
+      storageObject.bucketId,
+      storageObject.id,
+      storageObject.projectId,
+      3600
+    );
+    return `${base}/buckets/${storageObject.bucketId}/objects/${storageObject.id}/download?token=${encodeURIComponent(signed.token)}`;
+  }
+
   private storageObjectSelect() {
     return {
       id: true,
+      projectId: true,
       bucketId: true,
       key: true,
       fileName: true,
@@ -566,7 +784,7 @@ export class ObjectsService {
   }
 
   private async logOperation(
-    apiKey: ApiKeyAuthContext,
+    apiKey: ObjectAccessContext,
     bucketId: string,
     objectId: string | null,
     operation: OperationType,
@@ -578,6 +796,7 @@ export class ObjectsService {
       data: {
         projectId: apiKey.projectId,
         apiKeyId: apiKey.apiKeyId,
+        userId: apiKey.userId ?? null,
         bucketId,
         objectId,
         operation,
@@ -603,6 +822,8 @@ export class ObjectsService {
           return bucket.providerRootRef;
         }
 
+        await this.assertSameGoogleAccount(bucket.providerIntegrationId, driveProvider, credentials);
+        this.logger.warn(`Bucket folder missing on Drive; recreating bucket=${bucket.id}`);
         await this.prisma.bucket.update({
           where: { id: bucket.id, providerRootRef: bucket.providerRootRef },
           data: { providerRootRef: null },
@@ -640,6 +861,8 @@ export class ObjectsService {
       if (await driveProvider.isFolderUsable(existing.folderId, credentials)) {
         return existing.folderId;
       }
+
+      await this.assertSameGoogleAccount(resolvedIntegrationId, driveProvider, credentials);
 
       await this.prisma.bucketFolderRef.deleteMany({
         where: {
@@ -715,6 +938,8 @@ export class ObjectsService {
       if (await driveProvider.isFolderUsable(integration.sid3RootFolderRef, credentials)) {
         return integration.sid3RootFolderRef;
       }
+
+      await this.assertSameGoogleAccount(integrationId, driveProvider, credentials);
 
       await this.prisma.providerIntegration.updateMany({
         where: { id: integrationId, sid3RootFolderRef: integration.sid3RootFolderRef },

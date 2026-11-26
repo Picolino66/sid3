@@ -10,6 +10,10 @@ export type Connection = {
   status: ConnectionStatus;
   scopes: string[];
   sid3RootFolderStatus: Sid3RootFolderStatus;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  /** Projetos onde esta conexão está disponível. */
+  projects: { id: string; name: string }[];
   createdAt: string;
 };
 
@@ -22,6 +26,12 @@ export type ConfirmSid3RootFolderRequest = {
 export type OAuthAuthorizeResponse = {
   authorizationUrl: string;
   stateExpiresAt: string;
+};
+
+export const DEFAULT_CONNECTION_DISPLAY_NAME = 'GOOGLE_DRIVE';
+
+export type CreateGoogleAuthorizationRequest = {
+  displayName: string | null;
 };
 
 export type OAuthCallbackRequest = {

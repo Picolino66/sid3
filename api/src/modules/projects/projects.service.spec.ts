@@ -66,6 +66,8 @@ describe(ProjectsService.name, () => {
       id: '937d53d7-13d5-4f3d-96e0-7e8fef3717ad',
       name: 'Mídia Storage',
       slug: 'midia-storage',
+      connectionCount: 0,
+      bucketCount: 0,
       createdAt: createdAt.toISOString()
     });
   });
@@ -93,6 +95,8 @@ describe(ProjectsService.name, () => {
       id: '937d53d7-13d5-4f3d-96e0-7e8fef3717ad',
       name: 'Image Storage',
       slug: 'image-storage',
+      connectionCount: 0,
+      bucketCount: 0,
       createdAt: createdAt.toISOString()
     });
   });

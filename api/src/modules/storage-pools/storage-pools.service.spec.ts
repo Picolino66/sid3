@@ -82,7 +82,8 @@ describe(StoragePoolsService.name, () => {
     providerIntegrationDelegate = {
       findFirst: jest.fn().mockResolvedValue({
         id: connectionId,
-        status: ProviderIntegrationStatus.CONNECTED
+        status: ProviderIntegrationStatus.CONNECTED,
+        projectLinks: [{ id: 'link-id' }]
       })
     };
     storagePoolMemberDelegate = {
@@ -197,7 +198,7 @@ describe(StoragePoolsService.name, () => {
 
     expect(providerIntegrationDelegate.findFirst).toHaveBeenCalledWith({
       where: { id: connectionId, userId: ownerUserId },
-      select: { id: true, status: true }
+      select: { id: true, status: true, projectLinks: { where: { projectId }, select: { id: true } } }
     });
     expect(storagePoolMemberDelegate.create).toHaveBeenCalledWith({
       data: {
@@ -263,10 +264,21 @@ describe(StoragePoolsService.name, () => {
     );
   });
 
+  it('rejects pool members whose connection is not in the pool project', async () => {
+    providerIntegrationDelegate.findFirst.mockResolvedValue({
+      id: connectionId,
+      status: ProviderIntegrationStatus.CONNECTED,
+      projectLinks: []
+    });
+
+    await expect(service.addMember(ownerUserId, poolId, { connectionId })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rejects member creation for inactive connections', async () => {
     providerIntegrationDelegate.findFirst.mockResolvedValue({
       id: connectionId,
-      status: ProviderIntegrationStatus.REVOKED
+      status: ProviderIntegrationStatus.REVOKED,
+      projectLinks: [{ id: 'link-id' }]
     });
 
     await expect(service.addMember(ownerUserId, poolId, { connectionId })).rejects.toBeInstanceOf(

@@ -5,6 +5,7 @@ import { SID3_API_BASE_URL } from '../../core/api/api.config';
 import {
   ConfirmSid3RootFolderRequest,
   Connection,
+  CreateGoogleAuthorizationRequest,
   OAuthAuthorizeResponse,
   OAuthCallbackRequest,
   UpdateConnectionRequest
@@ -19,8 +20,8 @@ export class ConnectionsService {
     return this.http.get<Connection[]>(`${this.apiBaseUrl}/connections`);
   }
 
-  createGoogleAuthorizationUrl(): Observable<OAuthAuthorizeResponse> {
-    return this.http.post<OAuthAuthorizeResponse>(`${this.apiBaseUrl}/connections/google/authorize`, {});
+  createGoogleAuthorizationUrl(request: CreateGoogleAuthorizationRequest): Observable<OAuthAuthorizeResponse> {
+    return this.http.post<OAuthAuthorizeResponse>(`${this.apiBaseUrl}/connections/google/authorize`, request);
   }
 
   completeGoogleConnection(request: OAuthCallbackRequest): Observable<Connection> {
@@ -33,6 +34,10 @@ export class ConnectionsService {
 
   revokeConnection(connectionId: string): Observable<Connection> {
     return this.http.post<Connection>(`${this.apiBaseUrl}/connections/${connectionId}/revoke`, {});
+  }
+
+  deleteConnection(connectionId: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiBaseUrl}/connections/${connectionId}`);
   }
 
   reauthorizeConnection(connectionId: string): Observable<OAuthAuthorizeResponse> {
