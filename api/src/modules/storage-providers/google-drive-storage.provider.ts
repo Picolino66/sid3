@@ -314,6 +314,8 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
       const response = await drive.files.list({
         q: `mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and ${parentClause} and trashed = false`,
         fields: 'files(id)',
+        // Se existirem pastas repetidas, todas as chamadas escolhem a mesma: a mais antiga.
+        orderBy: 'createdTime',
         pageSize: 1
       });
 
@@ -360,7 +362,37 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     if (existing) {
       return existing;
     }
-    return this.createFolder(name, integration, parentFolderId);
+
+    const created = await this.createFolder(name, integration, parentFolderId);
+    return this.convergeOnOldestFolder(name, created, integration, parentFolderId);
+  }
+
+  /**
+   * Outra instância pode ter criado a mesma pasta no mesmo instante. Fica com a mais antiga e manda para a
+   * lixeira a que acabamos de criar (ainda vazia), para nunca deixar pastas duplicadas.
+   */
+  async convergeOnOldestFolder(
+    name: string,
+    createdFolderId: string,
+    integration: StorageProviderIntegrationCredentials,
+    parentFolderId?: string
+  ): Promise<string> {
+    const oldest = await this.findFolderByName(name, integration, parentFolderId);
+    if (!oldest || oldest === createdFolderId) {
+      return createdFolderId;
+    }
+
+    await this.trashFolder(createdFolderId, integration).catch(() => undefined);
+    return oldest;
+  }
+
+  async trashFolder(folderId: string, integration: StorageProviderIntegrationCredentials): Promise<void> {
+    const drive = this.createDriveClient(integration);
+    try {
+      await drive.files.update({ fileId: folderId, requestBody: { trashed: true } });
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive folder trash failed');
+    }
   }
 
   async isFolderUsable(

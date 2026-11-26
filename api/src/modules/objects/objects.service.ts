@@ -11,6 +11,7 @@ import {
 import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
+import { KeyedMutex } from '../../common/concurrency/keyed-mutex';
 import { PrismaService } from '../prisma/prisma.service';
 import { PoolRoutingFactory } from '../storage-pools/pool-routing/pool-routing.factory';
 import { PoolMemberCredentials } from '../storage-pools/pool-routing/pool-routing.strategy';
@@ -95,6 +96,8 @@ type BucketWithIntegration = {
 export class ObjectsService {
   private static readonly SID3_ROOT_FOLDER_NAME = 'sid3';
   private readonly logger = new Logger(ObjectsService.name);
+  /** Envios simultâneos esperam aqui em vez de cada um criar a sua pasta no Drive (pastas duplicadas). */
+  private readonly folderLocks = new KeyedMutex();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -809,7 +812,25 @@ export class ObjectsService {
     });
   }
 
+  /**
+   * Resolve a pasta do bucket uma requisição por vez (por bucket e conexão), relendo o banco já dentro da
+   * trava: quem chega depois reaproveita a pasta criada por quem chegou antes.
+   */
   private async resolveBucketFolderOnDrive(
+    bucket: BucketWithIntegration,
+    resolvedIntegrationId: string,
+    credentials: StorageProviderIntegrationCredentials
+  ): Promise<string | undefined> {
+    return this.folderLocks.runExclusive(`bucket-folder:${bucket.id}:${resolvedIntegrationId}`, async () => {
+      const fresh = bucket.providerIntegrationId
+        ? await this.prisma.bucket.findFirst({ where: { id: bucket.id }, select: { providerRootRef: true } })
+        : null;
+      const current = fresh ? { ...bucket, providerRootRef: fresh.providerRootRef } : bucket;
+      return this.resolveBucketFolderOnDriveUnlocked(current, resolvedIntegrationId, credentials);
+    });
+  }
+
+  private async resolveBucketFolderOnDriveUnlocked(
     bucket: BucketWithIntegration,
     resolvedIntegrationId: string,
     credentials: StorageProviderIntegrationCredentials
@@ -914,7 +935,9 @@ export class ObjectsService {
     bucketName: string,
     credentials: StorageProviderIntegrationCredentials
   ): Promise<string> {
-    const sid3RootFolderId = await this.resolveSid3RootFolder(integrationId, driveProvider, credentials);
+    const sid3RootFolderId = await this.folderLocks.runExclusive(`sid3-root:${integrationId}`, () =>
+      this.resolveSid3RootFolder(integrationId, driveProvider, credentials)
+    );
 
     return driveProvider.findOrCreateFolder(bucketName, credentials, sid3RootFolderId);
   }
@@ -971,7 +994,11 @@ export class ObjectsService {
       throw new ConflictException(this.sid3RootConfirmationRequiredMessage());
     }
 
-    const createdFolderId = await driveProvider.createFolder(ObjectsService.SID3_ROOT_FOLDER_NAME, credentials);
+    const createdFolderId = await driveProvider.convergeOnOldestFolder(
+      ObjectsService.SID3_ROOT_FOLDER_NAME,
+      await driveProvider.createFolder(ObjectsService.SID3_ROOT_FOLDER_NAME, credentials),
+      credentials
+    );
 
     const claimed = await this.prisma.providerIntegration.updateMany({
       where: { id: integrationId, sid3RootFolderStatus: Sid3RootFolderStatus.NOT_RESOLVED },

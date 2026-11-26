@@ -52,6 +52,7 @@ describe(ObjectsService.name, () => {
     createFolder: jest.Mock;
     isFolderUsable: jest.Mock;
     getAccountIdentity: jest.Mock;
+    convergeOnOldestFolder: jest.Mock;
   };
   let service: ObjectsService;
 
@@ -91,7 +92,8 @@ describe(ObjectsService.name, () => {
       findFolderByName: jest.fn().mockResolvedValue(null),
       createFolder: jest.fn().mockResolvedValue('sid3-root-folder-id'),
       isFolderUsable: jest.fn().mockResolvedValue(true),
-      getAccountIdentity: jest.fn().mockResolvedValue({ accountId: 'google-account', email: 'owner@example.com' })
+      getAccountIdentity: jest.fn().mockResolvedValue({ accountId: 'google-account', email: 'owner@example.com' }),
+      convergeOnOldestFolder: jest.fn((_name: string, createdId: string) => Promise.resolve(createdId))
     };
     const registry = {
       getProvider: jest.fn().mockReturnValue(provider)
@@ -841,6 +843,38 @@ describe(ObjectsService.name, () => {
       expect(provider.findOrCreateFolder).not.toHaveBeenCalled();
       expect(provider.createFolder).not.toHaveBeenCalled();
       expect(prisma.storageObject.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('envios simultâneos', () => {
+    it('criam a pasta do bucket uma única vez e reaproveitam a mesma pasta', async () => {
+      let storedRef: string | null = null;
+      prisma.bucket.findFirst.mockImplementation(async () => ({ ...bucket, providerRootRef: storedRef }));
+      prisma.bucket.update.mockImplementation(async ({ data }: { data: { providerRootRef?: string | null } }) => {
+        if ('providerRootRef' in data) storedRef = data.providerRootRef ?? null;
+        return { id: bucketId };
+      });
+      provider.findOrCreateFolder.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve('drive-folder-id'), 20))
+      );
+      prisma.storageObject.findFirst.mockResolvedValue(null);
+      prisma.storageObject.create.mockResolvedValue({ id: 'object-id' });
+      provider.uploadObject.mockResolvedValue({ providerFileId: 'f', fileName: 'a.png', contentType: 'image/png', sizeBytes: 4 });
+      prisma.storageObject.update.mockResolvedValue(persistedObject({}));
+      const file = { originalname: 'a.png', mimetype: 'image/png', size: 4, buffer: Buffer.from('file') } as Express.Multer.File;
+
+      await Promise.all([
+        service.uploadObject(apiKey, bucketId, { key: 'a.png' }, file),
+        service.uploadObject(apiKey, bucketId, { key: 'b.png' }, file),
+        service.uploadObject(apiKey, bucketId, { key: 'c.png' }, file)
+      ]);
+
+      expect(provider.findOrCreateFolder).toHaveBeenCalledTimes(1);
+      expect(provider.createFolder).toHaveBeenCalledTimes(1);
+      expect(provider.uploadObject).toHaveBeenCalledTimes(3);
+      for (const call of provider.uploadObject.mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ parentFolderId: 'drive-folder-id' }));
+      }
     });
   });
 
