@@ -1,9 +1,9 @@
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { finalize } from 'rxjs';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { toApiErrorMessage } from '../../core/api/api-error';
-import { Project } from '../projects/project.models';
-import { ProjectsService } from '../projects/projects.service';
 import { ProjectStorageStats } from './stats.models';
 import { StatsService } from './stats.service';
 
@@ -31,11 +31,6 @@ function usagePercent(used: string, total: string): number {
       <div>
         <h1>Estatísticas</h1>
       </div>
-      <select class="topbar-select" [value]="selectedProjectId()" (change)="selectProject($event)">
-        @for (project of projects(); track project.id) {
-          <option [value]="project.id">{{ project.name }}</option>
-        }
-      </select>
     </header>
 
     @if (errorMessage()) {
@@ -144,11 +139,11 @@ function usagePercent(used: string, total: string): number {
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class StatsPageComponent {
-  private readonly projectsService = inject(ProjectsService);
+  protected readonly projectContext = inject(ProjectContextService);
   private readonly statsService = inject(StatsService);
 
-  protected readonly projects = signal<Project[]>([]);
-  protected readonly selectedProjectId = signal('');
+  protected readonly projects = this.projectContext.projects;
+  protected readonly selectedProjectId = computed(() => this.projectContext.currentProjectId() ?? '');
   protected readonly stats = signal<ProjectStorageStats | null>(null);
   protected readonly isLoading = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
@@ -157,24 +152,17 @@ export class StatsPageComponent {
   protected readonly usagePercent = usagePercent;
 
   constructor() {
-    this.projectsService.listProjects().subscribe({
-      next: (projects) => {
-        this.projects.set(projects);
-        const first = projects.at(0);
-        if (first) {
-          this.selectedProjectId.set(first.id);
-          this.loadStats(first.id);
+    toObservable(this.projectContext.currentProjectId)
+      .pipe(takeUntilDestroyed())
+      .subscribe((projectId) => {
+        if (projectId) {
+          this.loadStats(projectId);
+        } else {
+          this.isLoading.set(false);
         }
-      },
-      error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
-    });
+      });
   }
 
-  selectProject(event: Event): void {
-    const projectId = (event.target as HTMLSelectElement).value;
-    this.selectedProjectId.set(projectId);
-    this.loadStats(projectId);
-  }
 
   private loadStats(projectId: string): void {
     this.isLoading.set(true);

@@ -72,7 +72,7 @@ export class LoginPageComponent {
       .login(this.form.getRawValue())
       .pipe(finalize(() => this.isSubmitting.set(false)))
       .subscribe({
-        next: () => void this.router.navigateByUrl('/projects'),
+        next: () => void this.router.navigateByUrl('/overview'),
         error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
       });
   }

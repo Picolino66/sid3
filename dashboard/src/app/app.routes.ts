@@ -5,7 +5,7 @@ export const routes: Routes = [
   {
     path: '',
     pathMatch: 'full',
-    redirectTo: 'projects'
+    redirectTo: 'overview'
   },
   {
     path: 'login',
@@ -27,6 +27,16 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./layout/dashboard-shell.component').then((m) => m.DashboardShellComponent),
     children: [
+      {
+        path: 'overview',
+        title: 'Início',
+        loadComponent: () => import('./features/overview/overview-page.component').then((m) => m.OverviewPageComponent)
+      },
+      {
+        path: 'storage',
+        title: 'Armazenamento',
+        loadComponent: () => import('./features/storage/storage-page.component').then((m) => m.StoragePageComponent)
+      },
       {
         path: 'projects',
         loadComponent: () => import('./features/projects/projects-page.component').then((m) => m.ProjectsPageComponent)
@@ -54,15 +64,9 @@ export const routes: Routes = [
         path: 'api-keys',
         loadComponent: () => import('./features/api-keys/api-keys-page.component').then((m) => m.ApiKeysPageComponent)
       },
-      {
-        path: 'buckets',
-        loadComponent: () => import('./features/buckets/buckets-page.component').then((m) => m.BucketsPageComponent)
-      },
-      {
-        path: 'storage-pools',
-        loadComponent: () =>
-          import('./features/storage-pools/storage-pools-page.component').then((m) => m.StoragePoolsPageComponent)
-      },
+      // Buckets e pools agora ficam em Armazenamento.
+      { path: 'buckets', redirectTo: 'storage' },
+      { path: 'storage-pools', redirectTo: 'storage' },
       {
         path: 'stats',
         loadComponent: () => import('./features/stats/stats-page.component').then((m) => m.StatsPageComponent)
@@ -83,6 +87,6 @@ export const routes: Routes = [
   },
   {
     path: '**',
-    redirectTo: 'projects'
+    redirectTo: 'overview'
   }
 ];

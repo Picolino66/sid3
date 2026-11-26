@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException
+} from '@nestjs/common';
 import { Provider, ProviderIntegrationStatus, Prisma, Sid3RootFolderStatus } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { TokenEncryptionService } from '../../common/security/token-encryption.service';
@@ -21,10 +28,16 @@ type PersistedConnection = {
   status: ProviderIntegrationStatus;
   scopes: string[];
   sid3RootFolderStatus: Sid3RootFolderStatus;
+  lastError: string | null;
+  lastErrorAt: Date | null;
+  projectLinks: { project: { id: string; name: string } }[];
   createdAt: Date;
 };
 
+type AccountIdentity = { accountId: string; email: string | null };
+
 const SID3_ROOT_FOLDER_NAME = 'sid3';
+export const DEFAULT_CONNECTION_DISPLAY_NAME = 'GOOGLE_DRIVE';
 
 @Injectable()
 export class ConnectionsService {
@@ -39,9 +52,12 @@ export class ConnectionsService {
     private readonly driveIndexSyncService: DriveIndexSyncService
   ) {}
 
-  async createGoogleAuthorizationUrl(userId: string): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
+  async createGoogleAuthorizationUrl(
+    userId: string,
+    displayName?: string | null
+  ): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
     await this.ensureUserExists(userId);
-    return this.generateOAuthState(userId);
+    return this.generateOAuthState(userId, undefined, this.normalizeDisplayName(displayName));
   }
 
   async reauthorizeGoogle(
@@ -66,7 +82,8 @@ export class ConnectionsService {
 
   private async generateOAuthState(
     userId: string,
-    connectionId?: string
+    connectionId?: string,
+    displayName?: string
   ): Promise<{ authorizationUrl: string; stateExpiresAt: string }> {
     const state = randomBytes(32).toString('base64url');
     const stateExpiresAt = new Date(Date.now() + this.oauthStateTtlMs);
@@ -77,6 +94,7 @@ export class ConnectionsService {
         stateHash: this.hashState(state),
         redirectUri: 'google',
         connectionId: connectionId ?? null,
+        displayName: displayName ?? null,
         expiresAt: stateExpiresAt
       }
     });
@@ -107,7 +125,8 @@ export class ConnectionsService {
       },
       select: {
         id: true,
-        connectionId: true
+        connectionId: true,
+        displayName: true
       }
     });
 
@@ -119,15 +138,23 @@ export class ConnectionsService {
 
     try {
       const tokens = await this.googleOAuthClient.exchangeCode(request.code);
+      const identity = await this.resolveAccountIdentity(tokens);
+      await this.assertAccountAllowed(userId, oauthState, identity);
       let connection: PersistedConnection;
 
       if (oauthState.connectionId) {
-        connection = await this.updateGoogleConnection(userId, oauthState.id, oauthState.connectionId, tokens);
+        connection = await this.updateGoogleConnection(userId, oauthState.id, oauthState.connectionId, tokens, identity);
         this.logger.log(
           `Reauthorized Google Drive connection=${this.maskId(connection.id)} user=${this.maskId(userId)} scopes=${connection.scopes.join(',')}`
         );
       } else {
-        connection = await this.storeGoogleConnection(userId, oauthState.id, tokens);
+        connection = await this.storeGoogleConnection(
+          userId,
+          oauthState.id,
+          tokens,
+          oauthState.displayName ?? DEFAULT_CONNECTION_DISPLAY_NAME,
+          identity
+        );
         this.logger.log(
           `Connected Google Drive connection=${this.maskId(connection.id)} user=${this.maskId(userId)} scopes=${connection.scopes.join(',')}`
         );
@@ -186,23 +213,18 @@ export class ConnectionsService {
   async revokeConnection(userId: string, connectionId: string): Promise<ConnectionResponseDto> {
     await this.ensureUserExists(userId);
 
-    const connection = await this.prisma.providerIntegration.findFirst({
-      where: {
-        id: connectionId,
-        userId
-      },
-      select: { id: true }
-    });
-
-    if (!connection) {
-      throw new NotFoundException('Conexão não encontrada');
-    }
+    const connection = await this.findConnectionCredentials(userId, connectionId);
+    await this.revokeAtGoogleIfUnshared(connection);
 
     const revoked = await this.prisma.providerIntegration.update({
       where: { id: connection.id },
       data: {
         status: ProviderIntegrationStatus.REVOKED,
-        revokedAt: new Date()
+        revokedAt: new Date(),
+        // Os tokens deixam de existir no SID3: reconectar exige um novo consentimento.
+        encryptedAccessToken: '',
+        encryptedRefreshToken: null,
+        tokenExpiresAt: null
       },
       select: this.connectionSelect()
     });
@@ -210,6 +232,37 @@ export class ConnectionsService {
     this.logger.log(`Revoked connection=${this.maskId(revoked.id)} user=${this.maskId(userId)}`);
 
     return this.toConnectionResponse(revoked);
+  }
+
+  /**
+   * Exclui a conexão. Bloqueado enquanto houver buckets, pools ou arquivos guardados nela, para nunca deixar
+   * objetos sem a conta que os guarda.
+   */
+  async deleteConnection(userId: string, connectionId: string): Promise<void> {
+    await this.ensureUserExists(userId);
+    const connection = await this.findConnectionCredentials(userId, connectionId);
+
+    const [bucketCount, poolMemberCount, objectCount] = await Promise.all([
+      this.prisma.bucket.count({ where: { providerIntegrationId: connection.id } }),
+      this.prisma.storagePoolMember.count({ where: { providerIntegrationId: connection.id } }),
+      this.prisma.storageObject.count({
+        where: { resolvedIntegrationId: connection.id, deletedAt: null, status: { not: 'DELETED' } }
+      })
+    ]);
+
+    if (bucketCount + poolMemberCount + objectCount > 0) {
+      throw new ConflictException(
+        `A conexão ainda está em uso: ${bucketCount} bucket(s), ${poolMemberCount} pool(s) e ${objectCount} arquivo(s). ` +
+          'Troque o destino dos buckets e remova a conexão dos pools antes de excluí-la.'
+      );
+    }
+
+    if (connection.status !== ProviderIntegrationStatus.REVOKED) {
+      await this.revokeAtGoogleIfUnshared(connection);
+    }
+
+    await this.prisma.providerIntegration.delete({ where: { id: connection.id } });
+    this.logger.log(`Deleted connection=${this.maskId(connection.id)} user=${this.maskId(userId)}`);
   }
 
   async confirmSid3RootFolder(
@@ -317,7 +370,9 @@ export class ConnectionsService {
   private async storeGoogleConnection(
     userId: string,
     oauthStateId: string,
-    tokens: GoogleTokenResult
+    tokens: GoogleTokenResult,
+    displayName: string,
+    identity: AccountIdentity
   ): Promise<PersistedConnection> {
     return this.prisma.$transaction(async (tx) => {
       await tx.oAuthState.update({
@@ -329,7 +384,9 @@ export class ConnectionsService {
         data: {
           userId,
           provider: Provider.GOOGLE_DRIVE,
-          displayName: null,
+          displayName,
+          providerAccountId: identity.accountId,
+          providerAccountEmail: identity.email,
           encryptedAccessToken: this.tokenEncryptionService.encrypt(tokens.accessToken),
           encryptedRefreshToken: tokens.refreshToken
             ? this.tokenEncryptionService.encrypt(tokens.refreshToken)
@@ -348,7 +405,8 @@ export class ConnectionsService {
     userId: string,
     oauthStateId: string,
     connectionId: string,
-    tokens: GoogleTokenResult
+    tokens: GoogleTokenResult,
+    identity: AccountIdentity
   ): Promise<PersistedConnection> {
     return this.prisma.$transaction(async (tx) => {
       await tx.oAuthState.update({
@@ -365,12 +423,136 @@ export class ConnectionsService {
             : undefined,
           tokenExpiresAt: tokens.expiryDate ?? undefined,
           scopes: tokens.scopes,
+          providerAccountId: identity.accountId,
+          providerAccountEmail: identity.email,
           status: ProviderIntegrationStatus.CONNECTED,
-          revokedAt: null
+          revokedAt: null,
+          lastError: null,
+          lastErrorAt: null
         },
         select: this.connectionSelect()
       });
     });
+  }
+
+  private async resolveAccountIdentity(tokens: GoogleTokenResult): Promise<AccountIdentity> {
+    const driveProvider = this.storageProviderRegistry.getProvider(Provider.GOOGLE_DRIVE) as GoogleDriveStorageProvider;
+    return driveProvider.getAccountIdentity({
+      provider: Provider.GOOGLE_DRIVE,
+      encryptedAccessToken: this.tokenEncryptionService.encrypt(tokens.accessToken),
+      encryptedRefreshToken: tokens.refreshToken ? this.tokenEncryptionService.encrypt(tokens.refreshToken) : null,
+      tokenExpiresAt: tokens.expiryDate
+    });
+  }
+
+  /**
+   * Reconectar só aceita a mesma conta Google da conexão; conectar uma conta nova recusa contas já conectadas.
+   * Isso impede que os tokens de uma conta substituam os de outra (incidente de 25/11/2026).
+   */
+  private async assertAccountAllowed(
+    userId: string,
+    oauthState: { id: string; connectionId: string | null },
+    identity: AccountIdentity
+  ): Promise<void> {
+    const email = identity.email ?? 'informada';
+
+    if (oauthState.connectionId) {
+      const target = await this.prisma.providerIntegration.findFirst({
+        where: { id: oauthState.connectionId, userId },
+        select: { providerAccountId: true, providerAccountEmail: true }
+      });
+
+      if (target?.providerAccountId && target.providerAccountId !== identity.accountId) {
+        await this.consumeState(oauthState.id);
+        throw new ConflictException(
+          `Esta conexão pertence a ${target.providerAccountEmail ?? 'outra conta Google'}, mas você entrou com ${email}. ` +
+            'Entre com a mesma conta para reconectar, ou use "Conectar Google Drive" para adicionar a outra conta como uma conexão separada.'
+        );
+      }
+    }
+
+    const duplicate = await this.prisma.providerIntegration.findFirst({
+      where: {
+        userId,
+        providerAccountId: identity.accountId,
+        ...(oauthState.connectionId ? { id: { not: oauthState.connectionId } } : {})
+      },
+      select: { displayName: true }
+    });
+
+    if (duplicate) {
+      await this.consumeState(oauthState.id);
+      throw new ConflictException(
+        `A conta ${email} já está conectada como "${duplicate.displayName ?? DEFAULT_CONNECTION_DISPLAY_NAME}". Use "Reconectar" nessa conexão.`
+      );
+    }
+  }
+
+  private async consumeState(oauthStateId: string): Promise<void> {
+    await this.prisma.oAuthState.update({ where: { id: oauthStateId }, data: { consumedAt: new Date() } });
+  }
+
+  private async findConnectionCredentials(userId: string, connectionId: string) {
+    const connection = await this.prisma.providerIntegration.findFirst({
+      where: { id: connectionId, userId },
+      select: {
+        id: true,
+        userId: true,
+        provider: true,
+        status: true,
+        providerAccountId: true,
+        encryptedAccessToken: true,
+        encryptedRefreshToken: true,
+        tokenExpiresAt: true
+      }
+    });
+
+    if (!connection) {
+      throw new NotFoundException('Conexão não encontrada');
+    }
+
+    return connection;
+  }
+
+  /**
+   * Revogar no Google derruba o consentimento inteiro da conta para o SID3. Só faz isso quando nenhuma outra
+   * conexão ativa usa a mesma conta (ou uma conta ainda não identificada do mesmo usuário).
+   */
+  private async revokeAtGoogleIfUnshared(connection: {
+    id: string;
+    userId: string;
+    provider: Provider;
+    providerAccountId: string | null;
+    encryptedAccessToken: string;
+    encryptedRefreshToken: string | null;
+    tokenExpiresAt: Date | null;
+  }): Promise<void> {
+    if (!connection.encryptedAccessToken) {
+      return;
+    }
+
+    const driveProvider = this.storageProviderRegistry.getProvider(connection.provider) as GoogleDriveStorageProvider;
+    const identity = await driveProvider.getAccountIdentity(connection).catch(() => null);
+    const accountId = identity?.accountId ?? connection.providerAccountId;
+
+    const sharedWith = await this.prisma.providerIntegration.count({
+      where: {
+        id: { not: connection.id },
+        status: { not: ProviderIntegrationStatus.REVOKED },
+        OR: [
+          ...(accountId ? [{ providerAccountId: accountId }] : []),
+          { userId: connection.userId, providerAccountId: null }
+        ]
+      }
+    });
+
+    if (sharedWith > 0) {
+      this.logger.warn(`Skipped Google revoke for connection=${this.maskId(connection.id)}: account shared with other connections`);
+      return;
+    }
+
+    const revoked = await driveProvider.revokeAuthorization(connection);
+    this.logger.log(`Google revoke for connection=${this.maskId(connection.id)} result=${revoked ? 'revoked' : 'already_invalid'}`);
   }
 
   private async ensureUserExists(userId: string): Promise<void> {
@@ -392,6 +574,10 @@ export class ConnectionsService {
     return value.length > 12 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
   }
 
+  private normalizeDisplayName(displayName?: string | null): string {
+    return displayName?.trim() || DEFAULT_CONNECTION_DISPLAY_NAME;
+  }
+
   private sanitizeError(error: unknown): string {
     if (error instanceof Error && error.message) {
       return error.message.replace(/code=[^&\s]+/gi, 'code=[redacted]');
@@ -409,11 +595,14 @@ export class ConnectionsService {
       status: connection.status,
       scopes: connection.scopes,
       sid3RootFolderStatus: connection.sid3RootFolderStatus,
+      lastError: connection.lastError,
+      lastErrorAt: connection.lastErrorAt?.toISOString() ?? null,
+      projects: connection.projectLinks.map((link) => ({ id: link.project.id, name: link.project.name })),
       createdAt: connection.createdAt.toISOString()
     };
   }
 
-  connectionSelect(): Prisma.ProviderIntegrationSelect {
+  connectionSelect() {
     return {
       id: true,
       provider: true,
@@ -422,7 +611,10 @@ export class ConnectionsService {
       status: true,
       scopes: true,
       sid3RootFolderStatus: true,
+      lastError: true,
+      lastErrorAt: true,
+      projectLinks: { select: { project: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } },
       createdAt: true
-    };
+    } satisfies Prisma.ProviderIntegrationSelect;
   }
 }

@@ -1,10 +1,13 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
-import { debounceTime, distinctUntilChanged, finalize, Subscription, switchMap, timer } from 'rxjs';
+import { debounceTime, distinctUntilChanged, finalize, map, Subscription, switchMap, timer } from 'rxjs';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { ProjectConnection } from '../projects/project.models';
+import { ProjectsService } from '../projects/projects.service';
 import { toApiErrorMessage } from '../../core/api/api-error';
 import { NotificationService } from '../../core/notifications/notification.service';
 import { Connection } from '../connections/connection.models';
@@ -56,8 +59,9 @@ type DrivePreview = {
   template: `
     <header class="topbar">
       <div>
+        <p class="eyebrow">{{ projectContext.currentProject()?.name ?? 'Projeto' }}</p>
         <h1>Meu Drive</h1>
-        <p class="muted">Arquivos indexados das suas contas Google Drive.</p>
+        <p class="muted">Todo o conteúdo das contas do Google Drive deste projeto.</p>
       </div>
       @if (connections().length > 1) {
         <label class="topbar-select">
@@ -75,8 +79,8 @@ type DrivePreview = {
       <p class="muted">Carregando conexões...</p>
     } @else if (connections().length === 0) {
       <section class="panel empty-cta">
-        <p class="muted">Nenhuma conta Google Drive ativa.</p>
-        <a class="button-link" routerLink="/connections">Conectar Google Drive</a>
+        <p class="muted">Nenhuma conta do Google Drive ativa neste projeto.</p>
+        <a class="button-link" routerLink="/storage">Adicionar conta ao projeto</a>
       </section>
     } @else {
       @if (status(); as indexStatus) {
@@ -352,6 +356,8 @@ type DrivePreview = {
 })
 export class DrivePageComponent {
   private readonly connectionsService = inject(ConnectionsService);
+  private readonly projectsService = inject(ProjectsService);
+  protected readonly projectContext = inject(ProjectContextService);
   private readonly driveFilesService = inject(DriveFilesService);
   private readonly notificationService = inject(NotificationService);
   private readonly sanitizer = inject(DomSanitizer);
@@ -435,7 +441,9 @@ export class DrivePageComponent {
       this.closePreview();
     });
 
-    this.loadConnections();
+    toObservable(this.projectContext.currentProjectId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((projectId) => this.loadConnections(projectId));
   }
 
   protected connectionLabel(connection: Connection): string {
@@ -617,10 +625,22 @@ export class DrivePageComponent {
     this.preview.set({ ...current, ...changes });
   }
 
-  private loadConnections(): void {
-    this.connectionsService
-      .listConnections()
+  /** Só as contas adicionadas ao projeto atual aparecem aqui. */
+  private loadConnections(projectId: string | null): void {
+    this.pollSubscription?.unsubscribe();
+    this.connections.set([]);
+    this.selectedConnectionId.set(null);
+    this.status.set(null);
+    this.listing.set(null);
+    if (!projectId) {
+      this.isLoadingConnections.set(false);
+      return;
+    }
+    this.isLoadingConnections.set(true);
+    this.projectsService
+      .listProjectConnections(projectId)
       .pipe(
+        map((links) => links.map((link) => toConnection(link))),
         finalize(() => this.isLoadingConnections.set(false)),
         takeUntilDestroyed(this.destroyRef)
       )
@@ -703,4 +723,20 @@ export class DrivePageComponent {
         error: (error: unknown) => this.errorMessage.set(toApiErrorMessage(error))
       });
   }
+}
+
+function toConnection(link: ProjectConnection): Connection {
+  return {
+    id: link.connectionId,
+    provider: 'GOOGLE_DRIVE',
+    displayName: link.displayName,
+    providerAccountEmail: link.providerAccountEmail,
+    status: link.status,
+    scopes: [],
+    sid3RootFolderStatus: link.sid3RootFolderStatus,
+    lastError: link.lastError,
+    lastErrorAt: null,
+    projects: [],
+    createdAt: link.linkedAt
+  };
 }

@@ -1,12 +1,6 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  OnApplicationBootstrap
-} from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap, Optional } from '@nestjs/common';
 import { DriveIndexStatus, ProviderIntegrationStatus } from '@prisma/client';
+import { ConnectionHealthService } from '../storage-providers/connection-health.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   DriveIndexedFile,
@@ -45,7 +39,8 @@ export class DriveIndexSyncService implements OnApplicationBootstrap {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly driveProvider: GoogleDriveStorageProvider
+    private readonly driveProvider: GoogleDriveStorageProvider,
+    @Optional() private readonly connectionHealth?: ConnectionHealthService
   ) {}
 
   /** Uma indexação interrompida por reinício do servidor não pode ficar presa como INDEXING. */
@@ -185,6 +180,7 @@ export class DriveIndexSyncService implements OnApplicationBootstrap {
     } catch (error) {
       const message = this.describeError(error);
       this.logger.error(`Drive index failed connection=${this.maskId(connectionId)} reason=${message}`);
+      await this.connectionHealth?.reportFailure(connectionId, error);
       await this.prisma.providerIntegration
         .update({
           where: { id: connectionId },

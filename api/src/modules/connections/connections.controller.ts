@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { CurrentUser } from '../../common/auth/types';
 import { ConfirmSid3RootFolderRequestDto } from './dto/confirm-sid3-root-folder-request.dto';
 import { ConnectionResponseDto } from './dto/connection-response.dto';
+import { CreateGoogleAuthorizationRequestDto } from './dto/create-google-authorization-request.dto';
 import { OAuthAuthorizeResponseDto } from './dto/oauth-authorize-response.dto';
 import { OAuthCallbackRequestDto } from './dto/oauth-callback-request.dto';
 import { UpdateConnectionRequestDto } from './dto/update-connection-request.dto';
@@ -27,8 +28,11 @@ export class ConnectionsController {
   @Post('google/authorize')
   @ApiOkResponse({ type: OAuthAuthorizeResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid or missing bearer token' })
-  createGoogleAuthorizationUrl(@CurrentUserContext() user: CurrentUser): Promise<OAuthAuthorizeResponseDto> {
-    return this.connectionsService.createGoogleAuthorizationUrl(user.id);
+  createGoogleAuthorizationUrl(
+    @CurrentUserContext() user: CurrentUser,
+    @Body() dto: CreateGoogleAuthorizationRequestDto
+  ): Promise<OAuthAuthorizeResponseDto> {
+    return this.connectionsService.createGoogleAuthorizationUrl(user.id, dto?.displayName);
   }
 
   @Post('google/callback')
@@ -69,6 +73,17 @@ export class ConnectionsController {
     @Param('connectionId') connectionId: string
   ): Promise<ConnectionResponseDto> {
     return this.connectionsService.revokeConnection(user.id, connectionId);
+  }
+
+  @Delete(':connectionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse({ description: 'Conexão excluída' })
+  @ApiNotFoundResponse({ description: 'Conexão não encontrada' })
+  deleteConnection(
+    @CurrentUserContext() user: CurrentUser,
+    @Param('connectionId') connectionId: string
+  ): Promise<void> {
+    return this.connectionsService.deleteConnection(user.id, connectionId);
   }
 
   @Post(':connectionId/reauthorize')

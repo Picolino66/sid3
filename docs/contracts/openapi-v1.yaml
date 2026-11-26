@@ -107,6 +107,16 @@ paths:
     post:
       tags: [Connections]
       summary: Create a Google OAuth authorization URL
+      description: >
+        Starts connecting a new Google Drive account. The optional displayName is kept
+        with the OAuth state and applied to the connection created in the callback;
+        blank or missing names default to "GOOGLE_DRIVE".
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGoogleAuthorizationRequest'
       responses:
         '200':
           description: Authorization URL
@@ -145,6 +155,21 @@ paths:
                 items:
                   $ref: '#/components/schemas/ProviderIntegration'
   /connections/{connectionId}:
+    delete:
+      tags: [Connections]
+      summary: Delete a connection not used by buckets, pools or files (revokes Google access)
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '409':
+          description: Still in use
     patch:
       tags: [Connections]
       summary: Update connection display name
@@ -837,6 +862,233 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Bucket'
+  /projects/{projectId}:
+    patch:
+      tags: [Projects]
+      summary: Rename a project
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    delete:
+      tags: [Projects]
+      summary: Delete a project without stored files (buckets, keys, pools and links are removed)
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '204':
+          description: Project deleted
+        '409':
+          description: The project still has files
+  /projects/{projectId}/overview:
+    get:
+      tags: [Projects]
+      summary: Project overview with totals, setup checklist and alerts
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOverview'
+  /projects/{projectId}/connections:
+    get:
+      tags: [Projects]
+      summary: Connections available in the project
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Linked connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectConnection'
+    post:
+      tags: [Projects]
+      summary: Make an existing connection available in the project (a connection can be in N projects)
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connectionId]
+              properties:
+                connectionId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectConnection'
+        '409':
+          description: Already linked
+  /projects/{projectId}/connections/{connectionId}:
+    delete:
+      tags: [Projects]
+      summary: Remove a connection from the project (the connection itself is kept)
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: connectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Unlinked
+        '409':
+          description: Still used by buckets, pools or files of the project
+  /projects/{projectId}/buckets/{bucketId}:
+    patch:
+      tags: [Buckets]
+      summary: Rename a bucket or change the destination of new uploads
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: bucketId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBucketRequest'
+      responses:
+        '200':
+          description: Bucket updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+    delete:
+      tags: [Buckets]
+      summary: Delete an empty bucket
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: bucketId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Bucket deleted
+        '409':
+          description: The bucket still has files
+  /projects/{projectId}/buckets/{bucketId}/objects:
+    get:
+      tags: [Objects]
+      summary: List bucket files for the logged-in owner (JWT), with folders, cursor pagination and signed URLs
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: bucketId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: prefix
+          in: query
+          schema:
+            type: string
+        - name: delimiter
+          in: query
+          description: Use "/" to navigate by folders
+          schema:
+            type: string
+            enum: ['/']
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Files and folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectListResponse'
+    post:
+      tags: [Objects]
+      summary: Upload a file as the logged-in owner (JWT)
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: bucketId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [key, file]
+              properties:
+                key:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded
+  /projects/{projectId}/buckets/{bucketId}/objects/{objectId}:
+    delete:
+      tags: [Objects]
+      summary: Delete a file as the logged-in owner (JWT)
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: bucketId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: objectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
   /projects/{projectId}/storage-pools:
     get:
       tags: [Storage Pools]
@@ -1275,6 +1527,86 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    UpdateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+    UpdateBucketRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        providerIntegrationId:
+          type: string
+          format: uuid
+        storagePoolId:
+          type: string
+          format: uuid
+    ProjectConnection:
+      type: object
+      properties:
+        connectionId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          nullable: true
+        providerAccountEmail:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [CONNECTED, REVOKED, ERROR]
+        sid3RootFolderStatus:
+          type: string
+        lastError:
+          type: string
+          nullable: true
+        canBrowseDrive:
+          type: boolean
+        bucketCount:
+          type: integer
+        linkedAt:
+          type: string
+          format: date-time
+    ProjectOverview:
+      type: object
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        projectName:
+          type: string
+        totals:
+          type: object
+          additionalProperties:
+            type: integer
+        setup:
+          type: object
+          additionalProperties:
+            type: boolean
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              severity:
+                type: string
+                enum: [critical, warning, info]
+              code:
+                type: string
+              message:
+                type: string
+              connectionId:
+                type: string
+                nullable: true
+              bucketId:
+                type: string
+                nullable: true
     RegisterRequest:
       type: object
       required: [email, password, name]
@@ -1351,6 +1683,14 @@ components:
         stateExpiresAt:
           type: string
           format: date-time
+    CreateGoogleAuthorizationRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 100
+          description: Name of the new connection. Defaults to "GOOGLE_DRIVE".
     OAuthCallbackRequest:
       type: object
       required: [code, state]
@@ -1590,12 +1930,17 @@ components:
           format: date-time
     ObjectListResponse:
       type: object
-      required: [items, nextCursor]
+      required: [items, folders, nextCursor]
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/StorageObject'
+        folders:
+          type: array
+          description: Direct subfolders of the prefix (delimiter=/, first page only)
+          items:
+            type: string
         nextCursor:
           type: string
           nullable: true

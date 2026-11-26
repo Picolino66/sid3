@@ -1,9 +1,9 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { finalize } from 'rxjs';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { toApiErrorMessage } from '../../core/api/api-error';
-import { Project } from '../projects/project.models';
-import { ProjectsService } from '../projects/projects.service';
 import { OperationLog } from './operation-log.models';
 import { OperationLogsService } from './operation-logs.service';
 
@@ -16,11 +16,6 @@ import { OperationLogsService } from './operation-logs.service';
         <h1>Logs de operações</h1>
       </div>
       <div class="logs-topbar-controls">
-        <select class="topbar-select" [value]="selectedProjectId()" (change)="selectProject($event)">
-          @for (project of projects(); track project.id) {
-            <option [value]="project.id">{{ project.name }}</option>
-          }
-        </select>
         <div class="logs-limit-control">
           <label for="logs-limit">Limite</label>
           <input id="logs-limit" type="number" min="1" max="100" [value]="limit()" (input)="setLimit($event)" />
@@ -71,25 +66,29 @@ import { OperationLogsService } from './operation-logs.service';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class LogsPageComponent {
-  private readonly projectsService = inject(ProjectsService);
+  protected readonly projectContext = inject(ProjectContextService);
   private readonly operationLogsService = inject(OperationLogsService);
 
-  protected readonly projects = signal<Project[]>([]);
+  protected readonly projects = this.projectContext.projects;
   protected readonly logs = signal<OperationLog[]>([]);
-  protected readonly selectedProjectId = signal('');
+  protected readonly selectedProjectId = computed(() => this.projectContext.currentProjectId() ?? '');
   protected readonly selectedProject = computed(() => this.projects().find((project) => project.id === this.selectedProjectId()));
   protected readonly limit = signal(50);
   protected readonly isLoading = signal(true);
   protected readonly errorMessage = signal<string | null>(null);
 
   constructor() {
-    this.loadProjects();
+    toObservable(this.projectContext.currentProjectId)
+      .pipe(takeUntilDestroyed())
+      .subscribe((projectId) => {
+        if (projectId) {
+          this.loadLogs();
+        } else {
+          this.isLoading.set(false);
+        }
+      });
   }
 
-  selectProject(event: Event): void {
-    this.selectedProjectId.set((event.target as HTMLSelectElement).value);
-    this.loadLogs();
-  }
 
   setLimit(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
@@ -135,22 +134,4 @@ export class LogsPageComponent {
     return value.length > 12 ? value.slice(0, 12) : value;
   }
 
-  private loadProjects(): void {
-    this.projectsService.listProjects().subscribe({
-      next: (projects) => {
-        this.projects.set(projects);
-        const firstProject = projects[0];
-        if (firstProject) {
-          this.selectedProjectId.set(firstProject.id);
-          this.loadLogs();
-        } else {
-          this.isLoading.set(false);
-        }
-      },
-      error: (error: unknown) => {
-        this.isLoading.set(false);
-        this.errorMessage.set(toApiErrorMessage(error));
-      }
-    });
-  }
 }

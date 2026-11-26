@@ -33,7 +33,7 @@ import { ObjectListResponseDto } from './dto/object-list-response.dto';
 import { SignedDownloadUrlResponseDto } from './dto/signed-download-url-response.dto';
 import { StorageObjectResponseDto } from './dto/storage-object-response.dto';
 import { UploadObjectRequestDto } from './dto/upload-object-request.dto';
-import { ObjectsService } from './objects.service';
+import { ObjectAccessContext, ObjectsService } from './objects.service';
 import { UploadCleanupInterceptor } from './upload-cleanup.interceptor';
 import { UploadProblemDetailsFilter } from './upload-problem-details.filter';
 
@@ -51,9 +51,11 @@ export class ObjectsController {
     @CurrentApiKey() apiKey: ApiKeyAuthContext,
     @Param('bucketId') bucketId: string,
     @Query('prefix') prefix?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('delimiter') delimiter?: string
   ): Promise<ObjectListResponseDto> {
-    return this.objectsService.listObjects(apiKey, bucketId, { prefix, limit });
+    return this.objectsService.listObjects(toAccess(apiKey), bucketId, { prefix, limit, cursor, delimiter });
   }
 
   @Post()
@@ -96,7 +98,7 @@ export class ObjectsController {
     @Body() request: UploadObjectRequestDto,
     @UploadedFile() file: Express.Multer.File
   ): Promise<StorageObjectResponseDto> {
-    return this.objectsService.uploadObject(apiKey, bucketId, request, file);
+    return this.objectsService.uploadObject(toAccess(apiKey), bucketId, request, file);
   }
 
   @Get(':objectId/download')
@@ -108,7 +110,7 @@ export class ObjectsController {
     @Param('objectId') objectId: string,
     @Res() response: Response
   ): Promise<void> {
-    const download = await this.objectsService.downloadObject(apiKey, bucketId, objectId);
+    const download = await this.objectsService.downloadObject(toAccess(apiKey), bucketId, objectId);
     response.setHeader('Content-Type', download.contentType ?? 'application/octet-stream');
     if (download.fileName) {
       response.setHeader('Content-Disposition', `attachment; filename="${download.fileName}"`);
@@ -128,7 +130,7 @@ export class ObjectsController {
     @Param('bucketId') bucketId: string,
     @Param('objectId') objectId: string
   ): Promise<void> {
-    await this.objectsService.deleteObject(apiKey, bucketId, objectId);
+    await this.objectsService.deleteObject(toAccess(apiKey), bucketId, objectId);
   }
 
   @Post(':objectId/sign-download')
@@ -141,6 +143,14 @@ export class ObjectsController {
     @Query('expiresIn') expiresIn?: string
   ): Promise<SignedDownloadUrlResponseDto> {
     const parsedExpiresIn = expiresIn ? parseInt(expiresIn, 10) : undefined;
-    return this.objectsService.signDownloadUrl(apiKey, bucketId, objectId, parsedExpiresIn);
+    return this.objectsService.signDownloadUrl(toAccess(apiKey), bucketId, objectId, parsedExpiresIn);
   }
+}
+
+/** URLs assinadas não têm chave de API real: registram a operação sem apiKeyId. */
+function toAccess(apiKey: ApiKeyAuthContext): ObjectAccessContext {
+  return {
+    projectId: apiKey.projectId,
+    apiKeyId: apiKey.apiKeyId === 'signed-url' ? null : apiKey.apiKeyId
+  };
 }

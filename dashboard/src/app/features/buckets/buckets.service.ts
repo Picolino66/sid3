@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { SID3_API_BASE_URL } from '../../core/api/api.config';
-import { Bucket, CreateBucketRequest } from './bucket.models';
+import { Bucket, CreateBucketRequest, UpdateBucketRequest } from './bucket.models';
 
 @Injectable({ providedIn: 'root' })
 export class BucketsService {
@@ -15,5 +15,13 @@ export class BucketsService {
 
   createBucket(projectId: string, request: CreateBucketRequest): Observable<Bucket> {
     return this.http.post<Bucket>(`${this.apiBaseUrl}/projects/${projectId}/buckets`, request);
+  }
+
+  updateBucket(projectId: string, bucketId: string, request: UpdateBucketRequest): Observable<Bucket> {
+    return this.http.patch<Bucket>(`${this.apiBaseUrl}/projects/${projectId}/buckets/${bucketId}`, request);
+  }
+
+  deleteBucket(projectId: string, bucketId: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiBaseUrl}/projects/${projectId}/buckets/${bucketId}`);
   }
 }

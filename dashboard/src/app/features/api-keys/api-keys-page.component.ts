@@ -2,9 +2,9 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { finalize } from 'rxjs';
+import { ProjectContextService } from '../../core/project-context/project-context.service';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { toApiErrorMessage } from '../../core/api/api-error';
-import { Project } from '../projects/project.models';
-import { ProjectsService } from '../projects/projects.service';
 import { ApiKey } from './api-key.models';
 import { ApiKeysService } from './api-keys.service';
 
@@ -24,14 +24,7 @@ import { ApiKeysService } from './api-keys.service';
           <h2>Criar chave de API</h2>
         </header>
 
-        <label>
-          Projeto
-          <select [value]="selectedProjectId()" (change)="selectProject($event)">
-            @for (project of projects(); track project.id) {
-              <option [value]="project.id">{{ project.name }}</option>
-            }
-          </select>
-        </label>
+        <p class="muted">Projeto: <strong>{{ selectedProject()?.name ?? '—' }}</strong></p>
 
         <label>
           Nome
@@ -115,13 +108,13 @@ import { ApiKeysService } from './api-keys.service';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ApiKeysPageComponent {
-  private readonly projectsService = inject(ProjectsService);
+  protected readonly projectContext = inject(ProjectContextService);
   private readonly apiKeysService = inject(ApiKeysService);
   private readonly formBuilder = inject(FormBuilder);
 
-  protected readonly projects = signal<Project[]>([]);
+  protected readonly projects = this.projectContext.projects;
   protected readonly apiKeys = signal<ApiKey[]>([]);
-  protected readonly selectedProjectId = signal<string>('');
+  protected readonly selectedProjectId = computed(() => this.projectContext.currentProjectId() ?? '');
   protected readonly selectedProject = computed(() => this.projects().find((project) => project.id === this.selectedProjectId()));
   protected readonly createdSecret = signal<string | null>(null);
   protected readonly copied = signal(false);
@@ -134,14 +127,17 @@ export class ApiKeysPageComponent {
   });
 
   constructor() {
-    this.loadProjects();
+    toObservable(this.projectContext.currentProjectId)
+      .pipe(takeUntilDestroyed())
+      .subscribe((projectId) => {
+        if (projectId) {
+          this.loadApiKeys(projectId);
+        } else {
+          this.isLoading.set(false);
+        }
+      });
   }
 
-  selectProject(event: Event): void {
-    const projectId = (event.target as HTMLSelectElement).value;
-    this.selectedProjectId.set(projectId);
-    this.loadApiKeys(projectId);
-  }
 
   copySecret(): void {
     const secret = this.createdSecret();
@@ -216,24 +212,6 @@ export class ApiKeysPageComponent {
     });
   }
 
-  private loadProjects(): void {
-    this.projectsService.listProjects().subscribe({
-      next: (projects) => {
-        this.projects.set(projects);
-        const firstProject = projects[0];
-        if (firstProject) {
-          this.selectedProjectId.set(firstProject.id);
-          this.loadApiKeys(firstProject.id);
-        } else {
-          this.isLoading.set(false);
-        }
-      },
-      error: (error: unknown) => {
-        this.isLoading.set(false);
-        this.errorMessage.set(toApiErrorMessage(error));
-      }
-    });
-  }
 
   private loadApiKeys(projectId: string): void {
     this.isLoading.set(true);

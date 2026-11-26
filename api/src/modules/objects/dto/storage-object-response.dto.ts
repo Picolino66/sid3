@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { StorageObjectStatus } from '@prisma/client';
 
 export class StorageObjectResponseDto {
@@ -31,4 +31,10 @@ export class StorageObjectResponseDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'URL assinada (1h) para visualizar/baixar. Só presente na listagem do painel (JWT).'
+  })
+  downloadUrl?: string | null;
 }

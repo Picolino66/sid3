@@ -17,6 +17,9 @@ export class BucketResponseDto {
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   storagePoolId!: string | null;
 
+  @ApiProperty({ description: 'Arquivos ativos no bucket' })
+  objectCount!: number;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 }

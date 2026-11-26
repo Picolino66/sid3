@@ -1,5 +1,5 @@
 import { BadGatewayException, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { OperationStatus, OperationType, Prisma, Provider, Sid3RootFolderStatus, StorageObjectStatus } from '@prisma/client';
+import { ProviderIntegrationStatus, OperationStatus, OperationType, Prisma, Provider, Sid3RootFolderStatus, StorageObjectStatus } from '@prisma/client';
 import { Readable } from 'stream';
 import { ApiKeyAuthContext } from '../../common/auth/api-key-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +24,9 @@ describe(ObjectsService.name, () => {
     storagePoolId: null,
     providerRootRef: null,
     providerIntegration: {
+      id: integrationId,
+      status: ProviderIntegrationStatus.CONNECTED,
+      displayName: null,
       provider: Provider.GOOGLE_DRIVE,
       encryptedAccessToken: 'encrypted-access',
       encryptedRefreshToken: 'encrypted-refresh',
@@ -48,6 +51,7 @@ describe(ObjectsService.name, () => {
     findFolderByName: jest.Mock;
     createFolder: jest.Mock;
     isFolderUsable: jest.Mock;
+    getAccountIdentity: jest.Mock;
   };
   let service: ObjectsService;
 
@@ -86,7 +90,8 @@ describe(ObjectsService.name, () => {
       findOrCreateFolder: jest.fn().mockResolvedValue('drive-folder-id'),
       findFolderByName: jest.fn().mockResolvedValue(null),
       createFolder: jest.fn().mockResolvedValue('sid3-root-folder-id'),
-      isFolderUsable: jest.fn().mockResolvedValue(true)
+      isFolderUsable: jest.fn().mockResolvedValue(true),
+      getAccountIdentity: jest.fn().mockResolvedValue({ accountId: 'google-account', email: 'owner@example.com' })
     };
     const registry = {
       getProvider: jest.fn().mockReturnValue(provider)
@@ -507,6 +512,9 @@ describe(ObjectsService.name, () => {
             weight: 1,
             roundRobinIndex: 0,
             providerIntegration: {
+              id: 'pool-integration',
+              status: ProviderIntegrationStatus.CONNECTED,
+              displayName: null,
               provider: Provider.GOOGLE_DRIVE,
               encryptedAccessToken: 'encrypted-access',
               encryptedRefreshToken: null,
@@ -562,6 +570,9 @@ describe(ObjectsService.name, () => {
             weight: 1,
             roundRobinIndex: 0,
             providerIntegration: {
+              id: 'pool-integration',
+              status: ProviderIntegrationStatus.CONNECTED,
+              displayName: null,
               provider: Provider.GOOGLE_DRIVE,
               encryptedAccessToken: 'encrypted-access',
               encryptedRefreshToken: null,
@@ -607,6 +618,9 @@ describe(ObjectsService.name, () => {
             weight: 1,
             roundRobinIndex: 0,
             providerIntegration: {
+              id: 'pool-integration',
+              status: ProviderIntegrationStatus.CONNECTED,
+              displayName: null,
               provider: Provider.GOOGLE_DRIVE,
               encryptedAccessToken: 'encrypted-access',
               encryptedRefreshToken: null,
@@ -658,6 +672,9 @@ describe(ObjectsService.name, () => {
             weight: 1,
             roundRobinIndex: 0,
             providerIntegration: {
+              id: 'pool-integration',
+              status: ProviderIntegrationStatus.CONNECTED,
+              displayName: null,
               provider: Provider.GOOGLE_DRIVE,
               encryptedAccessToken: 'encrypted-access',
               encryptedRefreshToken: null,
@@ -706,6 +723,127 @@ describe(ObjectsService.name, () => {
     });
   });
 
+  describe('listagem paginada e por pastas', () => {
+    it('devolve nextCursor quando há mais itens e aceita o cursor na página seguinte', async () => {
+      prisma.storageObject.findMany.mockResolvedValue([
+        persistedObject({ id: 'b', key: 'b.jpg' }),
+        persistedObject({ id: 'a', key: 'a.jpg' })
+      ]);
+
+      const first = await service.listObjects(apiKey, bucketId, { limit: '1' });
+
+      expect(first.items).toHaveLength(1);
+      expect(first.nextCursor).not.toBeNull();
+
+      prisma.storageObject.findMany.mockResolvedValue([persistedObject({ id: 'a', key: 'a.jpg' })]);
+      const second = await service.listObjects(apiKey, bucketId, { limit: '1', cursor: first.nextCursor! });
+
+      expect(prisma.storageObject.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: 'b' } }] })
+        })
+      );
+      expect(second.nextCursor).toBeNull();
+    });
+
+    it('lista subpastas e arquivos diretos do prefixo com delimiter=/', async () => {
+      const queryRaw = jest
+        .fn()
+        .mockResolvedValueOnce([{ name: '2026' }, { name: '2025' }])
+        .mockResolvedValueOnce([{ id: 'object-id' }]);
+      (prisma as unknown as { $queryRaw: jest.Mock }).$queryRaw = queryRaw;
+      prisma.storageObject.findMany.mockResolvedValue([persistedObject({ key: 'images/capa.jpg' })]);
+
+      const response = await service.listObjects(apiKey, bucketId, { prefix: 'images/', delimiter: '/' });
+
+      expect(response.folders).toEqual(['images/2026/', 'images/2025/']);
+      expect(response.items.map((item) => item.key)).toEqual(['images/capa.jpg']);
+      expect(response.nextCursor).toBeNull();
+    });
+
+    it('rejeita cursor inválido e delimitador diferente de /', async () => {
+      await expect(service.listObjects(apiKey, bucketId, { cursor: '%%%' })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.listObjects(apiKey, bucketId, { delimiter: '|' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('inclui URL assinada por item na listagem do painel', async () => {
+      prisma.storageObject.findMany.mockResolvedValue([persistedObject({ id: 'object-id' })]);
+
+      const response = await service.listObjects(
+        { projectId: 'project-id', apiKeyId: null, userId: 'owner-id' },
+        bucketId,
+        {},
+        { includeDownloadUrls: true }
+      );
+
+      expect(response.items[0]?.downloadUrl).toMatch(/^\/buckets\/bucket-id\/objects\/object-id\/download\?token=/);
+      expect(prisma.operationLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ apiKeyId: null, userId: 'owner-id' }) })
+      );
+    });
+  });
+
+  describe('proteções da conexão', () => {
+    const uploadFile = { originalname: 'a.png', mimetype: 'image/png', size: 4, buffer: Buffer.from('file') } as Express.Multer.File;
+
+    it('registra em todo objeto a conexão onde ele foi gravado', async () => {
+      prisma.storageObject.findFirst.mockResolvedValue(null);
+      prisma.storageObject.create.mockResolvedValue({ id: 'object-id' });
+      provider.uploadObject.mockResolvedValue({ providerFileId: 'f', fileName: 'a.png', contentType: 'image/png', sizeBytes: 4 });
+      prisma.storageObject.update.mockResolvedValue(persistedObject({}));
+      prisma.bucket.findFirst.mockResolvedValue({ ...bucket, providerRootRef: 'cached-folder-id' });
+
+      await service.uploadObject(apiKey, bucketId, { key: 'a.png' }, uploadFile);
+
+      expect(prisma.storageObject.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ resolvedIntegrationId: integrationId }) })
+      );
+    });
+
+    it('bloqueia o envio quando a conexão do bucket está revogada', async () => {
+      prisma.bucket.findFirst.mockResolvedValue({
+        ...bucket,
+        providerIntegration: { ...bucket.providerIntegration, status: ProviderIntegrationStatus.REVOKED }
+      });
+
+      await expect(service.uploadObject(apiKey, bucketId, { key: 'a.png' }, uploadFile)).rejects.toBeInstanceOf(
+        ConflictException
+      );
+      expect(provider.uploadObject).not.toHaveBeenCalled();
+    });
+
+    it('bloqueia o download de arquivo guardado numa conexão com erro', async () => {
+      prisma.storageObject.findFirst.mockResolvedValue({
+        provider: Provider.GOOGLE_DRIVE,
+        providerFileId: 'file-id',
+        resolvedIntegrationId: 'old-integration'
+      });
+      prisma.providerIntegration.findUniqueOrThrow.mockResolvedValue({
+        ...bucket.providerIntegration,
+        id: 'old-integration',
+        status: ProviderIntegrationStatus.ERROR
+      });
+
+      await expect(service.downloadObject(apiKey, bucketId, 'object-id')).rejects.toBeInstanceOf(ConflictException);
+      expect(provider.downloadObject).not.toHaveBeenCalled();
+    });
+
+    it('não recria pastas quando os tokens passaram a ser de outra conta Google', async () => {
+      prisma.storageObject.findFirst.mockResolvedValue(null);
+      prisma.bucket.findFirst.mockResolvedValue({ ...bucket, providerRootRef: 'pasta-original' });
+      provider.isFolderUsable.mockResolvedValue(false);
+      prisma.providerIntegration.findUniqueOrThrow.mockResolvedValue({ providerAccountId: 'conta-original' });
+      provider.getAccountIdentity.mockResolvedValue({ accountId: 'conta-da-namorada', email: 'outra@example.com' });
+
+      await expect(service.uploadObject(apiKey, bucketId, { key: 'a.png' }, uploadFile)).rejects.toBeInstanceOf(
+        ConflictException
+      );
+      expect(provider.findOrCreateFolder).not.toHaveBeenCalled();
+      expect(provider.createFolder).not.toHaveBeenCalled();
+      expect(prisma.storageObject.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('signDownloadUrl', () => {
     it('generates a signed download URL for an available object', async () => {
       prisma.storageObject.findFirst.mockResolvedValue(persistedObject({ id: 'obj-123' }));
@@ -728,6 +866,7 @@ describe(ObjectsService.name, () => {
 function persistedObject(overrides: Partial<{ id: string; key: string; providerFileId: string }>) {
   return {
     id: overrides.id ?? 'object-id',
+    projectId: 'project-id',
     bucketId: 'bucket-id',
     key: overrides.key ?? 'file.txt',
     providerFileId: overrides.providerFileId ?? 'provider-file-id',

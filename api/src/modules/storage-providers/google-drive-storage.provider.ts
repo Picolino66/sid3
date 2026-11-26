@@ -397,6 +397,37 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
     }
   }
 
+  /** Conta Google dona dos tokens. `permissionId` é estável e não muda se o e-mail mudar. */
+  async getAccountIdentity(
+    integration: StorageProviderIntegrationCredentials
+  ): Promise<{ accountId: string; email: string | null }> {
+    const drive = this.createDriveClient(integration);
+    try {
+      const response = await drive.about.get({ fields: 'user(emailAddress,permissionId)' });
+      const accountId = response.data.user?.permissionId;
+      if (!accountId) {
+        throw new BadGatewayException('Google Drive did not return the account id');
+      }
+      return { accountId, email: response.data.user?.emailAddress ?? null };
+    } catch (error) {
+      throw this.mapProviderError(error, 'Google Drive account lookup failed');
+    }
+  }
+
+  /** Revoga no Google o acesso concedido ao SID3. Falha silenciosamente se o token já estiver inválido. */
+  async revokeAuthorization(integration: StorageProviderIntegrationCredentials): Promise<boolean> {
+    try {
+      const client = this.createOAuthClient(integration);
+      const token = integration.encryptedRefreshToken
+        ? this.tokenEncryptionService.decrypt(integration.encryptedRefreshToken)
+        : this.tokenEncryptionService.decrypt(integration.encryptedAccessToken);
+      await client.revokeToken(token);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async getRootFolderId(integration: StorageProviderIntegrationCredentials): Promise<string> {
     const drive = this.createDriveClient(integration);
     try {
@@ -705,12 +736,42 @@ export class GoogleDriveStorageProvider implements StorageProviderPort {
       return error;
     }
 
+    if (isDriveAuthorizationFailure(error)) {
+      return new DriveAuthorizationError();
+    }
+
     if (error instanceof Error && error.message) {
       return new BadGatewayException(`${fallbackMessage}: ${error.message}`);
     }
 
     return new BadGatewayException(fallbackMessage);
   }
+}
+
+/** O Google recusou os tokens (revogados, expirados ou sem permissão): a conexão precisa ser reconectada. */
+export class DriveAuthorizationError extends BadGatewayException {
+  constructor() {
+    super('A autorização do Google Drive expirou ou foi revogada. Reconecte a conta em Conexões.');
+    this.name = 'DriveAuthorizationError';
+  }
+}
+
+export function isDriveAuthorizationFailure(error: unknown): boolean {
+  if (error instanceof DriveAuthorizationError) {
+    return true;
+  }
+  const status = (error as { response?: { status?: number } })?.response?.status
+    ?? (error as { code?: number | string })?.code;
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  const responseError = String((error as { response?: { data?: { error?: unknown } } })?.response?.data?.error ?? '');
+  return (
+    status === 401 ||
+    status === '401' ||
+    message.includes('invalid_grant') ||
+    message.includes('invalid credentials') ||
+    message.includes('no refresh token') ||
+    responseError === 'invalid_grant'
+  );
 }
 
 /** O token da Changes API expirou ou é inválido; é preciso refazer a varredura completa. */

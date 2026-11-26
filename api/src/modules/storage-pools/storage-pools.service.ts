@@ -133,15 +133,26 @@ export class StoragePoolsService {
     poolId: string,
     dto: AddPoolMemberRequestDto
   ): Promise<PoolMemberResponseDto> {
-    await this.findOwnedPool(ownerUserId, poolId);
+    const pool = await this.prisma.storagePool.findFirst({
+      where: { id: poolId, project: { ownerUserId } },
+      select: { projectId: true }
+    });
+
+    if (!pool) {
+      throw new NotFoundException('Pool de armazenamento não encontrado');
+    }
 
     const connection = await this.prisma.providerIntegration.findFirst({
       where: { id: dto.connectionId, userId: ownerUserId },
-      select: { id: true, status: true }
+      select: { id: true, status: true, projectLinks: { where: { projectId: pool.projectId }, select: { id: true } } }
     });
 
     if (!connection) {
       throw new UnauthorizedException('Conexão não encontrada para o usuário atual');
+    }
+
+    if (connection.projectLinks.length === 0) {
+      throw new BadRequestException('Adicione esta conexão ao projeto antes de colocá-la num pool.');
     }
 
     if (connection.status !== ProviderIntegrationStatus.CONNECTED) {
